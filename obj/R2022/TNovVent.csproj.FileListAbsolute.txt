@@ -1,0 +1,15 @@
+\\fs-nova\Distr\0.For Admin\_TNov\build\2022\TNovVent.dll.config
+\\fs-nova\Distr\0.For Admin\_TNov\build\2022\TNovVent.dll
+\\fs-nova\Distr\0.For Admin\_TNov\build\2022\TNovVent.pdb
+Z:\DEV\TNovVent\obj\R2022\TNovVent.csproj.AssemblyReference.cache
+Z:\DEV\TNovVent\obj\R2022\Duct3DWPF.g.cs
+Z:\DEV\TNovVent\obj\R2022\DTCWPF.g.cs
+Z:\DEV\TNovVent\obj\R2022\TNovVent_MarkupCompile.cache
+Z:\DEV\TNovVent\obj\R2022\TNovVent_MarkupCompile.lref
+Z:\DEV\TNovVent\obj\R2022\Duct3DWPF.baml
+Z:\DEV\TNovVent\obj\R2022\DTCWPF.baml
+Z:\DEV\TNovVent\obj\R2022\TNovVent.g.resources
+Z:\DEV\TNovVent\obj\R2022\TNovVent.csproj.CoreCompileInputs.cache
+Z:\DEV\TNovVent\obj\R2022\TNovVent.csproj.Up2Date
+Z:\DEV\TNovVent\obj\R2022\TNovVent.dll
+Z:\DEV\TNovVent\obj\R2022\TNovVent.pdb

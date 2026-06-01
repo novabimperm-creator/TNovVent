@@ -1,0 +1,82 @@
+﻿<Window x:Class="TNovVent.DTCWPF"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:TNovVent"
+             mc:Ignorable="d" Height="150" Width="280"
+        d:DataContext="{d:DesignInstance local:DTCViewModel}"
+            WindowStartupLocation="CenterScreen" 
+                                       AllowsTransparency="True"
+Background="Transparent" 
+            ResizeMode="NoResize" WindowStyle="None">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/TNovCommon;component/ButtonStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30"
+              ResizeBorderThickness="5"
+              GlassFrameThickness="0"
+              CornerRadius="12"/>
+    </WindowChrome.WindowChrome>
+    <Border CornerRadius="12"
+    Background="White"
+    BorderBrush="#FF008E43"
+    BorderThickness="1">
+        <Grid>
+            <!-- Верхняя панель (кастомный заголовок) -->
+            <Border Height="30" CornerRadius="12 12 0 0"
+    Background="#FF008E43" 
+    VerticalAlignment="Top"
+    MouseDown="Border_MouseDown">
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource RoundButtonStyle}" 
+Click="escButton_Click" Content="✕"
+HorizontalAlignment="Center" VerticalAlignment="Center"
+Width="20" Height="20" Margin="5,0"
+WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <Button Style="{StaticResource RoundButtonStyle2}" 
+Click="HelpButton_Click" Content="?"
+HorizontalAlignment="Center" VerticalAlignment="Center"
+Width="20" Height="20" Margin="0"
+WindowChrome.IsHitTestVisibleInChrome="True"/>
+                    <TextBlock Text="Стенки классы" 
+Foreground="White"
+VerticalAlignment="Center"
+Margin="10,0"/>
+                </StackPanel>
+
+            </Border>
+
+            <!-- Основное содержимое -->
+            <Border Margin="0,30,0,0">
+
+                <StackPanel VerticalAlignment="Center" Margin="5">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <TextBlock Margin="5" Text="Выберите сценарий работы:" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB1" GroupName="elems" IsThreeState="False" IsChecked="{Binding all}" Content="Все элементы" HorizontalAlignment="Left" Width="180" Margin="5" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB2" GroupName="elems" IsThreeState="False" IsChecked="{Binding visible}" Content="Выбранные элементы" HorizontalAlignment="Left" Width="180" Margin="5" />
+                    </StackPanel>
+
+
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Style="{StaticResource CustomButtonStyle}" Content="Отмена" x:Name="escButton" IsCancel="True" Click="escButton_Click" MinWidth="60" MinHeight="25" Margin="5" />
+                        <Button Style="{StaticResource CustomButtonStyle}" Content="Применить" x:Name="acceptButton" IsDefault="True" Click="acceptButton_Click" MinWidth="120" Margin="5"/>
+                    </StackPanel>
+
+                </StackPanel>
+
+            </Border>
+        </Grid>
+
+    </Border>
+</Window>
