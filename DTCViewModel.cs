@@ -21,6 +21,9 @@ namespace TNovVent
         {
             get => _visible; set { _visible = value; OnPropertyChanged(); }
         }
+        private string _filePath;
+        public string filePath { get { return _filePath; } set { _filePath = value; OnPropertyChanged(); } }
+
 
 
         public event EventHandler CloseRequest;

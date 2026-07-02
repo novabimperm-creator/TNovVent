@@ -14,6 +14,7 @@ using System.Threading;
 using System.Windows.Threading;
 using TNovCommon;
 using TNovMEPSpec;
+using Range = Microsoft.Office.Interop.Excel.Range;
 
 namespace TNovVent
 {
@@ -84,6 +85,7 @@ namespace TNovVent
                 viewModel = JsonConvert.DeserializeObject<DTCViewModel>(File.ReadAllText(jsonpath));
                 Logger.Log("Десериализация прошла успешно", 1);
             }
+            else viewModel.filePath = @"//fs-nova/NOVA/04_БИБЛИОТЕКА/BIM/ВК_ОВ_Семейства/_TNov/Воздуховоды_Толщина стенки.xlsx"; //по умолчанию
             var wpfview = new DTCWPF(viewModel);
             viewModel.CloseRequest += (s, e) => wpfview.Close();
             bool? ok = wpfview.ShowDialog();
@@ -153,7 +155,12 @@ namespace TNovVent
                     Element el = doc.GetElement(id);
                     if (el != null)
                     {
-                        if(el.Category.Id.IntegerValue== -2008000||el.Category.Id.IntegerValue== -2008010) allElems.Add(el);
+#if R2022
+                        long catId = el.Category.Id.IntegerValue;
+#else
+                        long catId = el.Category.Id.Value;
+#endif
+                        if (catId == -2008000 || catId == -2008010) allElems.Add(el);
                     }
                 }
                
@@ -176,7 +183,8 @@ namespace TNovVent
                 new InfoWindow280(str0).ShowDialog(); Logger.Log(str0 + " Завершение работы.", 3);
                 return Result.Failed;
             }
-            if (Param.ParamExistByGuid(adskTstParamGuid, DuctFittings.First()) == false)
+            Element duct1 = null; if (DuctFittings.Count > 0) duct1 = DuctFittings.First();
+            if (duct1 != null && Param.ParamExistByGuid(adskTstParamGuid, DuctFittings.First()) == false)
             {
                 string str0 = "У категории Соединительные детали воздуховодов отсутствует параметр ADSK_Толщина стенки!";
                 new InfoWindow280(str0).ShowDialog(); Logger.Log(str0 + " Завершение работы.", 3);
@@ -209,7 +217,7 @@ namespace TNovVent
             {
                 xlApp = new Microsoft.Office.Interop.Excel.Application();
                 workbooks = xlApp.Workbooks;
-                wb = workbooks.Open("//fs-nova/NOVA/04_БИБЛИОТЕКА/BIM/ВК_ОВ_Семейства/_TNov/Воздуховоды_Толщина стенки.xlsx", 0, true, 5, "", "", false, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "", true, false, 0, true, false, false);
+                wb = workbooks.Open(viewModel.filePath, 0, true, 5, "", "", false, Microsoft.Office.Interop.Excel.XlPlatform.xlWindows, "", true, false, 0, true, false, false);
                 
                 
                 if (xlApp != null)
@@ -289,10 +297,14 @@ namespace TNovVent
 
                     string classGerm = "?"; double thickness = 0; string connectedElems = "";
                     string cat = "Воздуховоды";
+#if R2022
+                        Logger.Log("   " + elem.Id.IntegerValue.ToString(), 2);
+#else
+                        Logger.Log("   " + elem.Id.Value.ToString(), 2);
+#endif
 
-                    Logger.Log("   " + elem.Id.IntegerValue.ToString(), 2);
 
-                    if (IsDuctConnector(elem)) 
+                        if (IsDuctConnector(elem)) 
                     {
                         cat = "Соединительные детали воздуховодов";
                         AnalyzeDuctConnector(doc, elem, out connectedElems);
@@ -489,12 +501,19 @@ namespace TNovVent
             if (element is FamilyInstance familyInstance)
             {
                 // Проверяем категорию и наличие коннекторов
-                if (familyInstance.Category != null &&
-                    (familyInstance.Category.Id.IntegerValue == (int)BuiltInCategory.OST_DuctFitting ||
-                     familyInstance.Category.Id.IntegerValue == (int)BuiltInCategory.OST_DuctAccessory ||
-                     familyInstance.Category.Id.IntegerValue == (int)BuiltInCategory.OST_DuctTerminal))
+                if (familyInstance.Category != null) 
                 {
-                    return true;
+#if R2022
+                        long catId = familyInstance.Category.Id.IntegerValue;
+#else
+                    long catId = familyInstance.Category.Id.Value;
+#endif
+                    if (catId == (int)BuiltInCategory.OST_DuctFitting ||
+                     catId == (int)BuiltInCategory.OST_DuctAccessory ||
+                     catId == (int)BuiltInCategory.OST_DuctTerminal)
+                    {
+                        return true;
+                    } 
                 }
             }
             return false;
@@ -528,7 +547,11 @@ namespace TNovVent
             // Если есть прямое подключение к воздуховодам
             if (hasDirectDuctConnection)
             {
+#if R2022
                 connectedElems = string.Join(",", connectedDuctIds.Select(id => id.IntegerValue));
+#else
+                connectedElems = string.Join(",", connectedDuctIds.Select(id => id.Value));
+#endif
                 return;
             }
 
@@ -580,7 +603,12 @@ namespace TNovVent
             // Если нашли воздуховоды через подключенные элементы
             if (connectedDuctIds.Count > 0)
             {
+#if R2022
                 connectedElems = string.Join(",", connectedDuctIds.Select(id => id.IntegerValue));
+#else
+                connectedElems = string.Join(",", connectedDuctIds.Select(id => id.Value));
+#endif
+                
             }
         }
 

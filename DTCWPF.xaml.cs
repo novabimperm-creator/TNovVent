@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿using Microsoft.Win32;
+using System.IO;
+using System.Windows;
 
 namespace TNovVent
 {
@@ -9,8 +11,9 @@ namespace TNovVent
     {
         public DTCWPF(DTCViewModel viewModel)
         {
-            InitializeComponent();
+            InitializeComponent(); 
             DataContext = viewModel;
+            SizeToContent = SizeToContent.Height;
         }
         private void acceptButton_Click(object sender, RoutedEventArgs e)
         {
@@ -28,7 +31,21 @@ namespace TNovVent
         {
 
         }
+        private void BrowseButton_Click(object sender, RoutedEventArgs e)
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.Filter = "Файлы Excel (*.xlsx)|*.xlsx";
+            openFileDialog.Title = "Выберите файл Excel";
 
+            
+
+            bool? result = openFileDialog.ShowDialog();
+
+            if (result == true)
+            {
+                FilePathTextBox.Text = openFileDialog.FileName;
+            }
+        }
         private void HelpButton_Click(object sender, RoutedEventArgs e)
         {
             string commandText = @"https://portal.talan.group/knowledge/proektirovanie/MEPductthickness/";

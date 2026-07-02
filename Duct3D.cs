@@ -13,6 +13,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using TNovCommon;
 using Parameter = Autodesk.Revit.DB.Parameter;
 using View = Autodesk.Revit.DB.View;
@@ -347,8 +348,13 @@ namespace TNovVent
                     foreach (ParameterFilterElement ftr in filterstorestore)
                     {
                         string name = ftr.Name.Replace(filterPrefix, "");
+#if R2022
                         ElementFilter elementFilter1 = (ElementFilter)new ElementParameterFilter(ParameterFilterRuleFactory.CreateNotEqualsRule(systemnameparamId, name, true));
-                        try
+#else
+                            ElementFilter elementFilter1 = (ElementFilter)new ElementParameterFilter(ParameterFilterRuleFactory.CreateNotEqualsRule(systemnameparamId, name));
+#endif
+
+                            try
                         {
                             
                             ftr.ClearRules(); //удаляем все правила
@@ -372,9 +378,13 @@ namespace TNovVent
                 //создаем недостающий фильтр либо выбираем существующий
                 foreach (string fname in filternamestoadd)
                 {
-                    
-                    ElementFilter elementFilter = (ElementFilter)new ElementParameterFilter(ParameterFilterRuleFactory.CreateNotEqualsRule(systemnameparamId, fname, true));
-                    ParameterFilterElement parameterFilterElement;
+#if R2022
+                        ElementFilter elementFilter = (ElementFilter)new ElementParameterFilter(ParameterFilterRuleFactory.CreateNotEqualsRule(systemnameparamId, fname, true));
+#else
+                        ElementFilter elementFilter = (ElementFilter)new ElementParameterFilter(ParameterFilterRuleFactory.CreateNotEqualsRule(systemnameparamId, fname));
+#endif
+
+                        ParameterFilterElement parameterFilterElement;
                     try
                     {
                         parameterFilterElement = ParameterFilterElement.Create(doc, filterPrefix + fname, catIds, elementFilter);

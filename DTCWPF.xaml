@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              xmlns:local="clr-namespace:TNovVent"
-             mc:Ignorable="d" Height="150" Width="280"
+             mc:Ignorable="d" Width="400"
         d:DataContext="{d:DesignInstance local:DTCViewModel}"
             WindowStartupLocation="CenterScreen" 
                                        AllowsTransparency="True"
@@ -55,17 +55,42 @@ Margin="10,0"/>
             <!-- Основное содержимое -->
             <Border Margin="0,30,0,0">
 
+                
                 <StackPanel VerticalAlignment="Center" Margin="5">
+                    <StackPanel>
+                        <Grid Margin="10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Поле для отображения пути к файлу -->
+                            <TextBox x:Name="FilePathTextBox" Text="{Binding filePath}" Grid.Row="0" Grid.Column="0" TextAlignment="Right"
+ Height="25" Margin="0,5,10,5" IsReadOnly="True"/>
+
+                            <!-- Кнопка выбора файла -->
+                            <Button Style="{StaticResource CustomButtonStyle}" x:Name="BrowseButton" Grid.Row="0" Grid.Column="1"
+Content="Обзор..." Height="25" Width="80" Click="BrowseButton_Click"/>
+
+
+                        </Grid>
+
+                    </StackPanel>
+                    
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <TextBlock Margin="5" Text="Выберите сценарий работы:" />
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB1" GroupName="elems" IsThreeState="False" IsChecked="{Binding all}" Content="Все элементы" HorizontalAlignment="Left" Width="180" Margin="5" />
+                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB1" GroupName="elems" IsThreeState="False" IsChecked="{Binding all}" Content="Все элементы" HorizontalAlignment="Left" Margin="5" />
+                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB2" GroupName="elems" IsThreeState="False" IsChecked="{Binding visible}" Content="Выбранные элементы" HorizontalAlignment="Left" Margin="5" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <RadioButton BorderBrush="#CCCCCC" x:Name="rB2" GroupName="elems" IsThreeState="False" IsChecked="{Binding visible}" Content="Выбранные элементы" HorizontalAlignment="Left" Width="180" Margin="5" />
-                    </StackPanel>
+                    
 
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
