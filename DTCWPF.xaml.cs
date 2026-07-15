@@ -44,9 +44,9 @@ namespace TNovVent
 
             bool? result = openFileDialog.ShowDialog();
 
-            if (result == true)
+            if (result == true && DataContext is DTCViewModel viewModel)
             {
-                FilePathTextBox.Text = openFileDialog.FileName;
+                viewModel.filePath = openFileDialog.FileName;
             }
         }
         private void HelpButton_Click(object sender, RoutedEventArgs e)
