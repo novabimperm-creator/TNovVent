@@ -1,0 +1,126 @@
+<Window x:Class="QOVETER.UI.OrientationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройка параметров расчета" 
+        Height="500" Width="400"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    
+    <Window.Resources>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+        
+        <Style TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,0,0,5"/>
+        </Style>
+        
+        <Style TargetType="ComboBox">
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Height" Value="30"/>
+        </Style>
+        
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Height" Value="30"/>
+        </Style>
+        
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="35"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+    </Window.Resources>
+    
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Ориентация помещений -->
+                <GroupBox Header="Ориентация помещений">
+                    <StackPanel>
+                        <TextBlock Text="Основная ориентация (для всех помещений):"/>
+                        <ComboBox x:Name="OrientationCombo" SelectedIndex="0">
+                            <ComboBoxItem>Север</ComboBoxItem>
+                            <ComboBoxItem>Северо-Восток</ComboBoxItem>
+                            <ComboBoxItem>Северо-Запад</ComboBoxItem>
+                            <ComboBoxItem>Восток</ComboBoxItem>
+                            <ComboBoxItem>Юго-Восток</ComboBoxItem>
+                            <ComboBoxItem>Запад</ComboBoxItem>
+                            <ComboBoxItem>Юг</ComboBoxItem>
+                            <ComboBoxItem>Юго-Запад</ComboBoxItem>
+                        </ComboBox>
+                        
+                        <CheckBox x:Name="ManualOrientationCheck" Content="Ручная ориентация для каждого помещения" 
+                                  Margin="0,10,0,0" Checked="ManualOrientationCheck_Checked"
+                                  Unchecked="ManualOrientationCheck_Unchecked"/>
+                        
+                        <TextBlock x:Name="OrientationHelpText" TextWrapping="Wrap" FontSize="11" 
+                                   Foreground="Gray" Margin="0,5,0,0">
+                            Север/СВ/СЗ/Восток: β=0.1
+                            ЮВ/Запад: β=0.05
+                            Юг/ЮЗ: β=0
+                        </TextBlock>
+                    </StackPanel>
+                </GroupBox>
+                
+                <!-- Этажность -->
+                <GroupBox Header="Этажность">
+                    <StackPanel>
+                        <TextBlock Text="Первый этаж (для расчета пола):"/>
+                        <ComboBox x:Name="GroundFloorCombo" DisplayMemberPath="Name"/>
+                        
+                        <TextBlock Text="Последний этаж (для расчета покрытия):" Margin="0,10,0,0"/>
+                        <ComboBox x:Name="TopFloorCombo" DisplayMemberPath="Name"/>
+                        
+                        <TextBlock x:Name="FloorHelpText" TextWrapping="Wrap" FontSize="11" 
+                                   Foreground="Gray" Margin="0,5,0,0">
+                            Для первого этажа tн=5°C
+                            Для последнего этажа учитывается покрытие
+                        </TextBlock>
+                    </StackPanel>
+                </GroupBox>
+                
+                <!-- Параметры здания -->
+                <GroupBox Header="Параметры здания">
+                    <StackPanel>
+                        <TextBlock Text="Высота этажа (м):"/>
+                        <TextBox x:Name="FloorHeightBox" Text="3.0" TextAlignment="Right"/>
+                        
+                        <TextBlock Text="Общая высота здания (м):" Margin="0,10,0,0"/>
+                        <TextBox x:Name="BuildingHeightBox" Text="10.0" TextAlignment="Right"/>
+                        
+                        <TextBlock Text="Тип наружных дверей:" Margin="0,10,0,0"/>
+                        <ComboBox x:Name="DoorTypeCombo" SelectedIndex="3">
+                            <ComboBoxItem>Тройные двери с двумя тамбурами</ComboBoxItem>
+                            <ComboBoxItem>Двойные двери с тамбуром</ComboBoxItem>
+                            <ComboBoxItem>Двойные двери без тамбура</ComboBoxItem>
+                            <ComboBoxItem>Одинарные двери</ComboBoxItem>
+                        </ComboBox>
+                        
+                        <TextBlock x:Name="DoorHelpText" TextWrapping="Wrap" FontSize="11" 
+                                   Foreground="Gray" Margin="0,5,0,0">
+                            β = 0,2H - тройные с двумя тамбурами
+                            β = 0,27H - двойные с тамбуром
+                            β = 0,34H - двойные без тамбура
+                            β = 0,22H - одинарные
+                        </TextBlock>
+                    </StackPanel>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+        
+        <!-- Кнопки -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="CancelButton" Content="Отмена" Width="100" Margin="0,0,10,0" 
+                    Click="CancelButton_Click" Background="#FF9E9E9E" Foreground="White"/>
+            <Button x:Name="ApplyButton" Content="Применить" Width="100" 
+                    Click="ApplyButton_Click" Background="#FF4CAF50" Foreground="White"/>
+        </StackPanel>
+    </Grid>
+</Window>

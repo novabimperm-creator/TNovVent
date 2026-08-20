@@ -29,6 +29,33 @@
     <ProjectReference Include="..\TNovMEPSpec\TNovMEPSpec.csproj" Private="false" />
   </ItemGroup>
 
+  <!-- ===== Расчёт теплопотерь (папка Heatloss) ===== -->
+  <!-- Отчёт собирается ClosedXML, а не Excel Interop: расчёт выгружает книгу
+       на машине без установленного Excel и без запуска COM-сервера.
+       RBush — пространственный индекс для поиска конструкций по геометрии. -->
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="RBush.Signed" Version="4.0.0" />
+  </ItemGroup>
+
+  <!-- Нормативные каталоги вшиты в сборку. Имена ресурсов заданы ЯВНО: по умолчанию
+       SDK составил бы их из RootNamespace (TNovVent) и пути к папке, а код читает
+       их по историческим именам QOVETER.Resources.* — те же имена стоят в тестах
+       и в документации проекта. Переименование здесь молча вернуло бы fallback
+       на два города с нулевыми температурами и пустой каталог СП 230. -->
+  <!-- Include, а НЕ Update: в SDK-проекте .json в стандартную выборку
+       EmbeddedResource не входит, а Update только правит уже включённый элемент.
+       С Update сборка проходит молча, и оба каталога просто не попадают в DLL:
+       CityService откатывается на два города с нулевыми температурами,
+       SP230Catalog оказывается пустым и мостики холода не считаются вовсе.
+       Сторож — проверка имён ресурсов после сборки. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Heatloss\Resources\Cities.json"
+                      LogicalName="QOVETER.Resources.Cities.json" />
+    <EmbeddedResource Include="Heatloss\Resources\SP230Bridges.json"
+                      LogicalName="QOVETER.Resources.SP230Bridges.json" />
+  </ItemGroup>
+
   <!-- ===== Версионирование ===== -->
   <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
     <Exec Command="powershell -ExecutionPolicy Bypass -File &quot;$(ProjectDir)UpdateVersion.ps1&quot;" />
