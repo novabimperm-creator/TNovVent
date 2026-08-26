@@ -90,6 +90,7 @@ namespace QOVETER.UI
             // Теперь окно открывается мгновенно, а модель читается ровно один раз —
             // по кнопке «Собрать помещения», уже с выбранным городом.
             ShowNotCollectedYet();
+            WarnIfExcelExportUnavailable();
             LoadCities();
 
             LevelsCombo.SelectionChanged += LevelsCombo_SelectionChanged;
@@ -125,6 +126,38 @@ namespace QOVETER.UI
                                     "Без выбранного города ГСОП = 0 и нормируемое сопротивление " +
                                     "не применяется.";
             StatusText.Foreground = Brushes.DarkOrange;
+        }
+
+        /// <summary>
+        /// Проверить СРАЗУ, соберётся ли книга Excel.
+        ///
+        /// <para>2026-08-26 на большом проекте инженер узнал, что библиотеки
+        /// экспорта рядом с плагином нет, только нажав «Excel» — после многочасового
+        /// сбора и расчёта. Проверка стоит миллисекунды и должна стоять в начале,
+        /// а не в конце рабочего дня.</para>
+        /// </summary>
+        private void WarnIfExcelExportUnavailable()
+        {
+            string missing = null;
+            foreach (string name in new[] { "ClosedXML", "DocumentFormat.OpenXml" })
+            {
+                try
+                {
+                    System.Reflection.Assembly.Load(name);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Сборка {name} не загрузилась — выгрузка в Excel будет " +
+                                $"заменена на CSV: {ex.Message}");
+                    missing = name;
+                    break;
+                }
+            }
+
+            if (missing == null) return;
+
+            StatusText.Text += $"  ⚠ Выгрузка в Excel недоступна: рядом с плагином нет " +
+                               $"{missing}.dll. Результаты сохранятся в CSV.";
         }
 
         private void LoadData()
@@ -1689,17 +1722,20 @@ namespace QOVETER.UI
                 if (dialog.ShowDialog(this) != true) return;
 
                 Mouse.OverrideCursor = Cursors.Wait;
+
+                // Параметры отчёта собираются ДО попытки записи: их же берёт
+                // запасной CSV, если книга Excel не соберётся.
+                var exportParams = new ExcelExportParams
+                {
+                    City         = (CitiesCombo.SelectedItem as CityData)?.Name ?? "",
+                    InternalTemp = TryParseFlexible(InternalTempBox.Text, out var ti) ? ti : 20,
+                    ExternalTemp = TryParseFlexible(ExternalTempBox.Text, out var te) ? te : -25
+                };
+
+                FillThermalCoverage(exportParams);
+
                 try
                 {
-                    var exportParams = new ExcelExportParams
-                    {
-                        City         = (CitiesCombo.SelectedItem as CityData)?.Name ?? "",
-                        InternalTemp = TryParseFlexible(InternalTempBox.Text, out var ti) ? ti : 20,
-                        ExternalTemp = TryParseFlexible(ExternalTempBox.Text, out var te) ? te : -25
-                    };
-
-                    FillThermalCoverage(exportParams);
-
                     string ext = System.IO.Path.GetExtension(dialog.FileName).ToLowerInvariant();
                     if (ext == ".json")
                         new JsonExportService().Export(_lastResults, dialog.FileName, exportParams);
@@ -1712,6 +1748,14 @@ namespace QOVETER.UI
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                 }
+                catch (Exception ex) when (IsMissingExportLibrary(ex))
+                {
+                    // Библиотеки Excel-экспорта нет рядом с DLL плагина. Расчёт при
+                    // этом уже сделан и лежит в памяти — терять его из-за отсутствующего
+                    // файла нельзя: 2026-08-26 на большом проекте это означало бы
+                    // выбросить часы работы Revit. Пишем те же строки в CSV.
+                    SaveAsCsvFallback(dialog.FileName, exportParams, ex);
+                }
                 finally
                 {
                     Mouse.OverrideCursor = null;
@@ -1722,6 +1766,73 @@ namespace QOVETER.UI
                 Logger.Error("Export_Click", ex);
                 ShowErrorMessage($"Ошибка при экспорте:\n{ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Это отсутствующая сборка экспорта, а не ошибка данных?
+        ///
+        /// <para>Отличать обязательно: при ошибке данных запасной CSV даст ту же
+        /// ошибку, а при отсутствующей библиотеке — спасёт результат расчёта.
+        /// .NET сообщает об этом двумя разными исключениями, и оба приходят
+        /// завёрнутыми в <see cref="System.Reflection.TargetInvocationException"/>
+        /// или в наш собственный <c>catch</c>, поэтому проверяется вся цепочка.</para>
+        /// </summary>
+        private static bool IsMissingExportLibrary(Exception ex)
+        {
+            for (var current = ex; current != null; current = current.InnerException)
+            {
+                if (current is System.IO.FileNotFoundException ||
+                    current is System.IO.FileLoadException ||
+                    current is BadImageFormatException ||
+                    current is TypeLoadException)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Сохранить результаты в CSV, когда Excel-экспорт недоступен, и объяснить
+        /// инженеру, что именно случилось и что с этим делать.
+        /// </summary>
+        private void SaveAsCsvFallback(string requestedPath, ExcelExportParams exportParams, Exception cause)
+        {
+            Logger.Error("Excel-экспорт недоступен: не загрузилась сборка ClosedXML " +
+                         "или её зависимость. Результаты сохраняются в CSV", cause);
+
+            string csvPath = System.IO.Path.ChangeExtension(requestedPath, ".csv");
+
+            try
+            {
+                new CsvExportService().Export(_lastResults, csvPath, exportParams);
+            }
+            catch (Exception csvEx)
+            {
+                Logger.Error("Не удался и запасной CSV", csvEx);
+                ShowErrorMessage(
+                    "Excel-экспорт недоступен (нет библиотеки ClosedXML рядом с плагином), " +
+                    $"и запасной CSV тоже не записался:\n{csvEx.Message}");
+                return;
+            }
+
+            string pluginDir = System.IO.Path.GetDirectoryName(
+                System.Reflection.Assembly.GetExecutingAssembly().Location);
+
+            MessageBox.Show(
+                $"Результаты сохранены в CSV:\n{csvPath}\n\n" +
+                "Книга Excel не собралась: рядом с библиотекой плагина нет ClosedXML " +
+                "или одной из её зависимостей. Расчёт при этом верный — потеряно только " +
+                "оформление отчёта и листы «Параметры» и «По квартирам».\n\n" +
+                "Чтобы вернуть выгрузку в Excel, нужно положить рядом с плагином файлы:\n" +
+                "ClosedXML.dll, ClosedXML.Parser.dll, DocumentFormat.OpenXml.dll, " +
+                "DocumentFormat.OpenXml.Framework.dll, ExcelNumberFormat.dll, " +
+                "SixLabors.Fonts.dll, RBush.dll, Microsoft.Bcl.HashCode.dll, " +
+                "System.Memory.dll, System.Buffers.dll, System.Numerics.Vectors.dll, " +
+                "System.Runtime.CompilerServices.Unsafe.dll.\n\n" +
+                $"Папка плагина:\n{pluginDir}",
+                "Отчёт сохранён в CSV",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
 
         /// <summary>
