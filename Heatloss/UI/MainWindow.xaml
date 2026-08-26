@@ -206,6 +206,11 @@
                          собираются кнопкой «Собрать помещения». -->
                     <Button x:Name="ModelAuditButton" Content="🔍 Аудит модели" Height="35" Margin="0,0,0,8" Click="ModelAudit_Click" Style="{StaticResource ButtonStyle}" Background="#FF8E44AD" ToolTip="Справочный обзор типов стен, окон и дверей модели. На расчёт не влияет."/>
                     <Button x:Name="CalculateButton" Content="⚡ Рассчитать теплопотери" Height="45" Margin="0,0,0,8" Click="CalculateAll_Click" Style="{StaticResource PrimaryButtonStyle}" FontSize="15"/>
+                    <!-- Ход сбора и отмена. Пока сбор не идёт, обе строки скрыты:
+                         на большом проекте обход модели идёт десятки минут, и
+                         молчащее окно неотличимо от зависшего Revit. -->
+                    <ProgressBar x:Name="CollectProgress" Height="14" Margin="0,0,0,4" Minimum="0" Maximum="100" Visibility="Collapsed"/>
+                    <Button x:Name="CancelCollectButton" Content="Отменить сбор" Height="28" Margin="0,0,0,8" Click="CancelCollect_Click" Style="{StaticResource ButtonStyle}" Background="#FFC0392B" Visibility="Collapsed"/>
                     <TextBlock x:Name="StatusText" Margin="0,5,0,0" TextWrapping="Wrap" Foreground="#FF7F8C8D" FontSize="12" TextAlignment="Center"/>
                 </StackPanel>
             </Grid>

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
@@ -37,15 +38,7 @@ namespace QOVETER.Services
 
             try
             {
-                var floors = new FilteredElementCollector(_document)
-                    .OfCategory(BuiltInCategory.OST_Floors)
-                    .WhereElementIsNotElementType()
-                    .OfClass(typeof(Floor))
-                    .Cast<Floor>();
-
-                Floor match = floors.FirstOrDefault(f =>
-                    SameLevel(f.LevelId, revitRoom.LevelId)
-                    && BoxesOverlapXY(f.get_BoundingBox(null), bbox));
+                Floor match = FindFloor(revitRoom, bbox);
 
                 if (match != null && match.FloorType != null)
                 {
@@ -86,13 +79,7 @@ namespace QOVETER.Services
 
             try
             {
-                var match = new FilteredElementCollector(_document)
-                    .OfCategory(BuiltInCategory.OST_Floors)
-                    .WhereElementIsNotElementType()
-                    .OfClass(typeof(Floor))
-                    .Cast<Floor>()
-                    .FirstOrDefault(f => SameLevel(f.LevelId, revitRoom.LevelId)
-                                      && BoxesOverlapXY(f.get_BoundingBox(null), bbox));
+                var match = FindFloor(revitRoom, bbox);
 
                 var cs = match?.FloorType?.GetCompoundStructure();
                 if (cs == null) return 0;
@@ -127,24 +114,18 @@ namespace QOVETER.Services
 
             try
             {
-                var roofs = new FilteredElementCollector(_document)
-                    .OfCategory(BuiltInCategory.OST_Roofs)
-                    .WhereElementIsNotElementType()
-                    .OfClass(typeof(RoofBase))
-                    .Cast<RoofBase>();
-
-                foreach (var roof in roofs)
+                foreach (var entry in RoofCache)
                 {
-                    var rb = roof.get_BoundingBox(null);
+                    var rb = entry.Box;
                     if (rb == null) continue;
                     if (!BoxesOverlapXY(rb, bbox)) continue;
                     // Кровля — выше комнаты
                     if (rb.Min.Z < bbox.Max.Z - 0.5) continue;
 
-                    double u = ComputeU(roof.RoofType?.GetCompoundStructure());
+                    double u = ComputeU(entry.Element.RoofType?.GetCompoundStructure());
                     if (u > 0)
                     {
-                        Logger.Debug($"[Roof U] {roomData.Name}: U={u:F3} (из {roof.RoofType?.Name})");
+                        Logger.Debug($"[Roof U] {roomData.Name}: U={u:F3} (из {entry.Element.RoofType?.Name})");
                         return u;
                     }
                 }
@@ -155,6 +136,108 @@ namespace QOVETER.Services
             }
 
             return fallback;
+        }
+
+        // ─────────────────────────────────────────────────────────
+        //  КЭШИ КОНСТРУКЦИЙ
+        //
+        //  Перекрытия и кровли раньше запрашивались ЗАНОВО на каждое помещение:
+        //  три метода (U пола, R слоёв пола, U кровли) — три полных обхода
+        //  категории с вызовом get_BoundingBox у каждого элемента. Габарит
+        //  в Revit не хранится готовым, он вычисляется по геометрии, и цена
+        //  выходила «помещения × перекрытия»: на большом проекте (отзыв
+        //  сетевиков 2026-08-26, расчёт около трёх часов) это десятки миллионов
+        //  вычислений габарита на ровном месте.
+        //
+        //  Кэш живёт ровно один расчёт: CalculationEngine, а с ним и этот класс,
+        //  создаются заново на каждое нажатие «Рассчитать теплопотери», поэтому
+        //  правка модели между расчётами подхватывается.
+        // ─────────────────────────────────────────────────────────
+
+        /// <summary>Элемент с уже вычисленным габаритом.</summary>
+        private sealed class Boxed<T> where T : Element
+        {
+            public T Element;
+            public BoundingBoxXYZ Box;
+        }
+
+        private Dictionary<int, List<Boxed<Floor>>> _floorsByLevel;
+        private List<Boxed<RoofBase>> _roofs;
+
+        /// <summary>Перекрытия, разложенные по уровню; порядок внутри уровня — как у коллектора.</summary>
+        private Dictionary<int, List<Boxed<Floor>>> FloorsByLevel
+        {
+            get
+            {
+                if (_floorsByLevel != null) return _floorsByLevel;
+
+                _floorsByLevel = new Dictionary<int, List<Boxed<Floor>>>();
+                foreach (var floor in new FilteredElementCollector(_document)
+                             .OfCategory(BuiltInCategory.OST_Floors)
+                             .WhereElementIsNotElementType()
+                             .OfClass(typeof(Floor))
+                             .Cast<Floor>())
+                {
+                    if (floor.LevelId == null) continue;
+                    int levelKey = floor.LevelId.IntegerValue;
+
+                    List<Boxed<Floor>> list;
+                    if (!_floorsByLevel.TryGetValue(levelKey, out list))
+                    {
+                        list = new List<Boxed<Floor>>();
+                        _floorsByLevel[levelKey] = list;
+                    }
+
+                    list.Add(new Boxed<Floor> { Element = floor, Box = floor.get_BoundingBox(null) });
+                }
+
+                Logger.Debug($"[Кэш] перекрытий: {_floorsByLevel.Values.Sum(v => v.Count)} " +
+                             $"на {_floorsByLevel.Count} уровнях");
+                return _floorsByLevel;
+            }
+        }
+
+        /// <summary>Кровли в порядке коллектора — порядок решает, какая найдётся первой.</summary>
+        private List<Boxed<RoofBase>> RoofCache
+        {
+            get
+            {
+                if (_roofs != null) return _roofs;
+
+                _roofs = new FilteredElementCollector(_document)
+                    .OfCategory(BuiltInCategory.OST_Roofs)
+                    .WhereElementIsNotElementType()
+                    .OfClass(typeof(RoofBase))
+                    .Cast<RoofBase>()
+                    .Select(r => new Boxed<RoofBase> { Element = r, Box = r.get_BoundingBox(null) })
+                    .ToList();
+
+                Logger.Debug($"[Кэш] кровель: {_roofs.Count}");
+                return _roofs;
+            }
+        }
+
+        /// <summary>
+        /// Перекрытие помещения: первое по порядку коллектора, у которого совпадает
+        /// уровень и габарит перекрывается с габаритом помещения в плане.
+        /// Отбор по уровню сделан ключом словаря, а не проверкой на каждом элементе:
+        /// результат тот же, обход — только по своему этажу.
+        /// </summary>
+        private Floor FindFloor(Room revitRoom, BoundingBoxXYZ roomBox)
+        {
+            if (revitRoom.LevelId == null) return null;
+
+            List<Boxed<Floor>> candidates;
+            if (!FloorsByLevel.TryGetValue(revitRoom.LevelId.IntegerValue, out candidates))
+                return null;
+
+            foreach (var entry in candidates)
+            {
+                if (BoxesOverlapXY(entry.Box, roomBox))
+                    return entry.Element;
+            }
+
+            return null;
         }
 
         private double ComputeU(CompoundStructure cs)
@@ -180,11 +263,8 @@ namespace QOVETER.Services
             }
         }
 
-        private static bool SameLevel(ElementId a, ElementId b)
-        {
-            if (a == null || b == null) return false;
-            return a == b || a.IntegerValue == b.IntegerValue;
-        }
+        // SameLevel(ElementId, ElementId) больше не нужен: совпадение уровня
+        // обеспечивает ключ словаря FloorsByLevel (см. FindFloor).
 
         private static bool BoxesOverlapXY(BoundingBoxXYZ a, BoundingBoxXYZ b)
         {

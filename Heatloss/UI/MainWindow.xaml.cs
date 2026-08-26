@@ -12,6 +12,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 // ✅ РЕШЕНИЕ: Добавлены псевдонимы для устранения неоднозначности
 using WpfGrid = System.Windows.Controls.Grid;
@@ -70,15 +71,65 @@ namespace QOVETER.UI
             // при ΔT примерно на 40% больше реальной.
             UpdateUI();
 
-            LoadData();
+            // Сбор помещений при ОТКРЫТИИ окна не запускается — намеренно.
+            //
+            // Раньше здесь стоял LoadData(), то есть полный обход модели
+            // (GeometryCollector.CollectRoomsFromCurrentModel) ещё до того, как окно
+            // появилось на экране. На 76-СУЗДАЛ.23 это 20-25 минут, а на большом
+            // проекте сетевиков (отзыв 2026-08-26) — около трёх часов, в течение
+            // которых Revit выглядит зависшим: инженер нажал кнопку плагина и не
+            // видит ни окна, ни причины ждать.
+            //
+            // Этот проход был не только долгим, но и БЕСПОЛЕЗНЫМ: город на момент
+            // открытия окна не выбран, ГСОП = 0, нижняя граница нормируемого R
+            // не применяется — и любой инженер, работающий по инструкции
+            // «город → собрать → рассчитать», тут же нажимал «Собрать помещения»
+            // и запускал тот же обход второй раз. Из двух одинаковых обходов
+            // в отчёт шёл только второй.
+            //
+            // Теперь окно открывается мгновенно, а модель читается ровно один раз —
+            // по кнопке «Собрать помещения», уже с выбранным городом.
+            ShowNotCollectedYet();
             LoadCities();
 
             LevelsCombo.SelectionChanged += LevelsCombo_SelectionChanged;
             CitiesCombo.SelectionChanged += CitiesCombo_SelectionChanged;
+
+            // Закрыть окно посреди сбора нельзя: обход модели идёт в потоке Revit
+            // и после закрытия окна продолжился бы вслепую. Крестик во время сбора
+            // означает «отменить» — и окно закроется, когда сбор остановится.
+            Closing += (s, e) =>
+            {
+                if (!_collecting) return;
+
+                e.Cancel = true;
+                _collectCancelled = true;
+                StatusText.Text = "Останавливаюсь на ближайшем помещении…";
+            };
+        }
+
+        /// <summary>
+        /// Стартовое состояние окна: модель ещё не читалась.
+        ///
+        /// <para>Список уровней заполняется из <see cref="LevelService"/> — это один
+        /// дешёвый запрос по категории «Уровни», а не обход геометрии. Он нужен,
+        /// чтобы фильтр этажей не был пустым до сбора.</para>
+        /// </summary>
+        private void ShowNotCollectedYet()
+        {
+            RebuildLevelsFromRooms();   // _allRooms пуст → уровни берутся из модели
+
+            RoomCountText.Text    = "Помещения не собраны";
+            StatusText.Text       = "Порядок работы: 1) выберите ГОРОД, " +
+                                    "2) нажмите «Собрать помещения», 3) «Рассчитать теплопотери». " +
+                                    "Без выбранного города ГСОП = 0 и нормируемое сопротивление " +
+                                    "не применяется.";
+            StatusText.Foreground = Brushes.DarkOrange;
         }
 
         private void LoadData()
         {
+            BeginCollectUi();
             try
             {
                 var collector = new GeometryCollector(_document, _apartmentParameterName)
@@ -89,6 +140,9 @@ namespace QOVETER.UI
                     // бетоном: на 76-СУЗДАЛ.23 это U = 3,73 против нормы 0,32.
                     DegreeDays = ResolveDegreeDays()
                 };
+
+                collector.Progress = OnCollectProgress;
+                collector.CancelRequested = () => _collectCancelled;
 
                 // Кэш сканера уровней держит результаты по СТАРЫМ объектам RoomData.
                 // Без сброса повторное «Собрать помещения» не перепроверяло аномалии
@@ -235,12 +289,31 @@ namespace QOVETER.UI
                 UpdateRoomsList();
                 DrawFloorPlan();
             }
+            catch (OperationCanceledException)
+            {
+                // Прерванный сбор — это НЕ половина модели в отчёте. Собранное
+                // выбрасывается целиком: помещение, разобранное до отмены,
+                // ничем не отличается на вид от разобранного полностью, и
+                // посчитать по нему здание значило бы выдать неверные числа
+                // за верные.
+                _allRooms = new List<RoomData>();
+                RebuildLevelsFromRooms();
+                UpdateRoomsList();
+                DrawFloorPlan();
+
+                StatusText.Text = "Сбор отменён. Помещения не собраны — нажмите " +
+                                  "«Собрать помещения», когда будете готовы ждать.";
+                StatusText.Foreground = Brushes.DarkOrange;
+                RoomCountText.Text = "Помещения не собраны";
+            }
             catch (Exception ex)
             {
                 ShowErrorMessage($"Ошибка загрузки данных:\n{ex.Message}\n{ex.StackTrace}");
             }
             finally
             {
+                EndCollectUi();
+
                 // Сбор помещений — самая «болтливая» операция: досбрасываем лог,
                 // чтобы он был полным сразу, не дожидаясь закрытия окна.
                 Logger.Flush();
@@ -254,6 +327,133 @@ namespace QOVETER.UI
                     StatusText.Foreground = Brushes.DarkOrange;
                 }
             }
+        }
+
+        // ─────────────────────────────────────────────────────────
+        //  ХОД СБОРА И ОТМЕНА
+        //
+        //  Сбор идёт в потоке Revit — иначе нельзя, Revit API работает только
+        //  в своём потоке. Значит, окно во время сбора не перерисовывается само,
+        //  и «плагин думает» выглядит как зависший Revit: сетевики 2026-08-26
+        //  ждали около трёх часов, не имея ни строки о том, что происходит,
+        //  и не имея способа прекратить, кроме как снять Revit из диспетчера
+        //  задач вместе с несохранённой моделью.
+        //
+        //  Поэтому окно прокачивается вручную (PumpUi) — не чаще четырёх раз
+        //  в секунду, чтобы сама перерисовка не стала статьёй расхода.
+        // ─────────────────────────────────────────────────────────
+
+        private bool _collecting;
+        private bool _collectCancelled;
+        private System.Diagnostics.Stopwatch _collectWatch;
+        private DateTime _lastProgressShownAt = DateTime.MinValue;
+
+        /// <summary>Реже — незаметно для глаза; чаще — тратится на перерисовку.</summary>
+        private static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(250);
+
+        private void BeginCollectUi()
+        {
+            _collecting = true;
+            _collectCancelled = false;
+            _collectWatch = System.Diagnostics.Stopwatch.StartNew();
+            _lastProgressShownAt = DateTime.MinValue;
+
+            CollectProgress.Value = 0;
+            CollectProgress.IsIndeterminate = true;
+            CollectProgress.Visibility = System.Windows.Visibility.Visible;
+            CancelCollectButton.Visibility = System.Windows.Visibility.Visible;
+            CancelCollectButton.IsEnabled = true;
+            CancelCollectButton.Content = "Отменить сбор";
+
+            // Пока идёт сбор, вторая тяжёлая операция запускаться не должна:
+            // прокачка окна делает кнопки живыми, а Revit API повторного входа
+            // не прощает.
+            LoadDataButton.IsEnabled = false;
+            CalculateButton.IsEnabled = false;
+            ModelAuditButton.IsEnabled = false;
+
+            StatusText.Text = "Читаю модель…";
+            StatusText.Foreground = Brushes.DarkOrange;
+            PumpUi();
+        }
+
+        private void EndCollectUi()
+        {
+            _collecting = false;
+            CollectProgress.Visibility = System.Windows.Visibility.Collapsed;
+            CollectProgress.IsIndeterminate = false;
+            CancelCollectButton.Visibility = System.Windows.Visibility.Collapsed;
+
+            LoadDataButton.IsEnabled = true;
+            CalculateButton.IsEnabled = true;
+            ModelAuditButton.IsEnabled = true;
+
+            if (_collectWatch != null)
+            {
+                _collectWatch.Stop();
+                Logger.Info($"Сбор помещений занял {_collectWatch.Elapsed.TotalMinutes:F1} мин");
+            }
+        }
+
+        /// <summary>
+        /// Показать ход сбора. Вызывается из потока Revit между помещениями.
+        /// Оценка остатка — по среднему времени на уже разобранные помещения:
+        /// инженеру нужно решить, ждать ему или уйти, а для этого хватает
+        /// и грубой оценки.
+        /// </summary>
+        private void OnCollectProgress(int done, int total, string what)
+        {
+            var now = DateTime.Now;
+            if (now - _lastProgressShownAt < ProgressInterval) return;
+            _lastProgressShownAt = now;
+
+            if (total > 0)
+            {
+                CollectProgress.IsIndeterminate = false;
+                CollectProgress.Maximum = total;
+                CollectProgress.Value = done;
+
+                string eta = "";
+                double elapsedSec = _collectWatch?.Elapsed.TotalSeconds ?? 0;
+                if (done > 0 && elapsedSec > 2)
+                {
+                    double leftSec = elapsedSec / done * (total - done);
+                    eta = leftSec > 90
+                        ? $", осталось ~{leftSec / 60:F0} мин"
+                        : $", осталось ~{leftSec:F0} с";
+                }
+
+                StatusText.Text = $"Разбираю помещения: {done} из {total}{eta}. Сейчас: {what}";
+            }
+            else
+            {
+                CollectProgress.IsIndeterminate = true;
+                StatusText.Text = what;
+            }
+
+            PumpUi();
+        }
+
+        private void CancelCollect_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_collecting) return;
+
+            _collectCancelled = true;
+            CancelCollectButton.IsEnabled = false;
+            CancelCollectButton.Content = "Останавливаюсь…";
+            StatusText.Text = "Останавливаюсь на ближайшем помещении…";
+        }
+
+        /// <summary>
+        /// Дать окну перерисоваться и обработать нажатия, не уходя из потока Revit.
+        /// </summary>
+        private static void PumpUi()
+        {
+            var frame = new DispatcherFrame();
+            Dispatcher.CurrentDispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() => frame.Continue = false));
+            Dispatcher.PushFrame(frame);
         }
 
         /// <summary>
@@ -1111,6 +1311,8 @@ namespace QOVETER.UI
 
         private void CalculateAll_Click(object sender, RoutedEventArgs e)
         {
+            if (_collecting) return;
+
             try
             {
                 if (!TryParseFlexible(InternalTempBox.Text, out double tIn))
@@ -1752,6 +1954,10 @@ namespace QOVETER.UI
 
         private void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
+            // Во время сбора окно живое (его прокачивает PumpUi), поэтому повторное
+            // нажатие технически возможно — а войти в Revit API второй раз нельзя.
+            if (_collecting) return;
+
             LoadData();
         }
 
@@ -1767,6 +1973,8 @@ namespace QOVETER.UI
         /// </summary>
         private void ModelAudit_Click(object sender, RoutedEventArgs e)
         {
+            if (_collecting) return;
+
             try
             {
                 StatusText.Text = "Аудит элементов модели...";

@@ -76,12 +76,17 @@ namespace QOVETER.Services
             LogUnheatedTemperatures(parameters);
 
             // Шаг 1. Трансмиссионные теплопотери и бытовые тепловыделения — покомнатно.
+            Perf.Reset();
+            long stage = Perf.Now;
+
             var computations = new List<RoomComputation>();
             foreach (var room in selectedRooms)
             {
                 try
                 {
+                    long t = Perf.Now;
                     computations.Add(ComputeRoomTransmission(room, parameters, buildingParams));
+                    Perf.Add("Трансмиссия помещения", t);
                 }
                 catch (Exception ex)
                 {
@@ -93,6 +98,8 @@ namespace QOVETER.Services
                     });
                 }
             }
+
+            Perf.Add("Шаг 1. Трансмиссия по помещениям", stage);
 
             LogReducedSummary(computations, parameters);
 
@@ -110,7 +117,8 @@ namespace QOVETER.Services
             {
                 results.Add(CreateSummaryResult(results, parameters));
             }
-            
+
+            Perf.Report("расчёт теплопотерь");
             return results;
         }
 
@@ -1173,7 +1181,11 @@ namespace QOVETER.Services
         private double GetFloorUValue(RoomData room)
         {
             if (_floorRoofCalculator != null)
-                return _floorRoofCalculator.GetFloorUValue(room);
+            {
+                long t = Perf.Now;
+                try { return _floorRoofCalculator.GetFloorUValue(room); }
+                finally { Perf.Add("U пола из модели", t); }
+            }
 
             // Fallback при использовании конструктора без Document — та же таблица,
             // что и внутри FloorRoofThermalCalculator: раньше это были две копии.
@@ -1186,7 +1198,11 @@ namespace QOVETER.Services
         private double GetRoofUValue(RoomData room)
         {
             if (_floorRoofCalculator != null)
-                return _floorRoofCalculator.GetRoofUValue(room);
+            {
+                long t = Perf.Now;
+                try { return _floorRoofCalculator.GetRoofUValue(room); }
+                finally { Perf.Add("U кровли из модели", t); }
+            }
 
             return ThermalConstants.RoofUFallback(room.Name, room.Type);
         }

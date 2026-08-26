@@ -213,11 +213,31 @@ namespace QOVETER.Services
             var rooms = new List<RoomData>();
             try
             {
+                // Замер начинается здесь и печатается таблицей в конце сбора:
+                // на чужой модели «долго» без чисел не разбирается (см. Perf).
+                Perf.Reset();
+                _nonWallDescribeUsed = 0;
+                _nonWallDescribeSkipped = 0;
+
+                long stage = Perf.Now;
                 rooms.AddRange(CollectRoomsFromDocument());
+                Perf.Add("Этап 1. Список помещений", stage);
+
                 ProcessRooms(rooms);
+
+                stage = Perf.Now;
                 AssignDominantConstruction(rooms);
+                Perf.Add("Этап 3. Конструкция по большинству", stage);
+
+                stage = Perf.Now;
+                ReportProgress(0, 0, "Определение помещений под кровлей");
                 DetectRoomsUnderRoof(rooms);
+                Perf.Add("Этап 4. Под кровлей", stage);
+
+                stage = Perf.Now;
+                ReportProgress(0, 0, "Разбор пола и стен по зонам грунта");
                 AssignGroundZones(rooms);
+                Perf.Add("Этап 5. Зоны грунта", stage);
                 Logger.Info($"\u0421\u043e\u0431\u0440\u0430\u043d\u043e {rooms.Count} \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439 \u0438\u0437 \u0410\u0420-\u043c\u043e\u0434\u0435\u043b\u0438");
 
                 if (WindowsWithDefaultSize > 0)
@@ -271,12 +291,36 @@ namespace QOVETER.Services
                 }
 
                 LogEnclosureSummary();
+
+                if (_nonWallDescribeSkipped > 0)
+                {
+                    Logger.Info(
+                        $"[Промахи] что стоит впереди вместо стен, разобрано у первых " +
+                        $"{NonWallDescribeBudget} сегментов; ещё у {_nonWallDescribeSkipped} " +
+                        "этот разбор пропущен намеренно — он идёт по всем категориям модели " +
+                        "и на большом проекте стоит дороже самого расчёта. Причина у них " +
+                        "та же, что у разобранных.");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Отмена — не ошибка: инженер решил, что ждать не будет.
+                // Сводку времени всё равно печатаем: именно ради неё прогон
+                // на долгой модели и запускают.
+                Logger.Warn($"Сбор помещений прерван инженером. Разобрано {rooms.Count} помещений; " +
+                            "числа неполные и в расчёт не идут.");
+                Perf.Report("сбор помещений (прерван)");
+                Logger.Flush();
+                throw;
             }
             catch (Exception ex)
             {
                 Logger.Error("\u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u0431\u043e\u0440\u0430 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439 \u0438\u0437 \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u043c\u043e\u0434\u0435\u043b\u0438", ex);
                 throw;
             }
+
+            // Таблица времени — последним, чтобы её было видно в конце журнала.
+            Perf.Report("сбор помещений");
             return rooms;
         }
 
@@ -388,8 +432,17 @@ namespace QOVETER.Services
 
         private void ProcessRooms(List<RoomData> rooms)
         {
+            long stage = Perf.Now;
+            int done = 0;
+
             foreach (var room in rooms)
             {
+                // Отмена проверяется НА ГРАНИЦЕ помещения: разорвать разбор
+                // одного помещения посередине значит оставить его с половиной
+                // ограждений, а такие числа хуже отсутствующих.
+                ThrowIfCancelled();
+                ReportProgress(++done, rooms.Count, room.Name);
+
                 try
                 {
                     Room revitRoom = _document.GetElement(new ElementId(room.Id)) as Room;
@@ -399,10 +452,15 @@ namespace QOVETER.Services
                     // и объём, и надбавка за высокое помещение.
                     ApplyEffectiveHeight(room, revitRoom);
 
+                    long t = Perf.Now;
                     room.Windows = _elementCollector.CollectWindowsForRoom(revitRoom);
                     room.Doors   = _elementCollector.CollectDoorsForRoom(revitRoom);
+                    Perf.Add("Окна и двери помещения", t);
 
+                    t = Perf.Now;
                     CalculateRoomAreasFromBoundary(room, revitRoom, _document);
+                    Perf.Add("Разбор границ помещения", t);
+
                     DetermineRoomProperties(room);
                 }
                 catch (Exception ex)
@@ -410,6 +468,64 @@ namespace QOVETER.Services
                     Logger.Error($"\u041e\u0448\u0438\u0431\u043a\u0430 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0438 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u044f {room.Name}", ex);
                 }
             }
+
+            Perf.Add("\u042d\u0442\u0430\u043f 2. \u041e\u0431\u0440\u0430\u0431\u043e\u0442\u043a\u0430 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439", stage);
+        }
+
+        // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        //  \u0425\u041e\u0414 \u0420\u0410\u0411\u041e\u0422\u042b \u0418 \u041e\u0422\u041c\u0415\u041d\u0410
+        //
+        //  \u0421\u0431\u043e\u0440 \u0438\u0434\u0451\u0442 \u0432 \u043f\u043e\u0442\u043e\u043a\u0435 Revit \u0438 \u0434\u0435\u0440\u0436\u0438\u0442 \u0435\u0433\u043e \u0446\u0435\u043b\u0438\u043a\u043e\u043c: \u043f\u043e\u043a\u0430 \u043e\u043d \u043d\u0435 \u043a\u043e\u043d\u0447\u0438\u0442\u0441\u044f,
+        //  \u043e\u043a\u043d\u043e \u043d\u0435 \u043f\u0435\u0440\u0435\u0440\u0438\u0441\u043e\u0432\u044b\u0432\u0430\u0435\u0442\u0441\u044f. \u041d\u0430 20 \u043c\u0438\u043d\u0443\u0442\u0430\u0445 \u044d\u0442\u043e \u0442\u0435\u0440\u043f\u0438\u043c\u043e, \u043d\u0430 \u0442\u0440\u0451\u0445 \u0447\u0430\u0441\u0430\u0445
+        //  (\u043e\u0442\u0437\u044b\u0432 \u0441\u0435\u0442\u0435\u0432\u0438\u043a\u043e\u0432 2026-08-26) \u043d\u0435\u043e\u0442\u043b\u0438\u0447\u0438\u043c\u043e \u043e\u0442 \u0437\u0430\u0432\u0438\u0441\u0430\u043d\u0438\u044f, \u0438 \u0441\u043d\u044f\u0442\u044c \u0440\u0430\u0441\u0447\u0451\u0442
+        //  \u043c\u043e\u0436\u043d\u043e \u0431\u044b\u043b\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0443\u0431\u0438\u0432 Revit \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u043d\u0435\u0441\u043e\u0445\u0440\u0430\u043d\u0451\u043d\u043d\u043e\u0439 \u043c\u043e\u0434\u0435\u043b\u044c\u044e.
+        //
+        //  \u041e\u0431\u0430 \u043e\u0431\u0440\u0430\u0431\u043e\u0442\u0447\u0438\u043a\u0430 \u043f\u043e\u0434\u0441\u0442\u0430\u0432\u043b\u044f\u0435\u0442 UI: \u043e\u043d \u0436\u0435 \u0440\u0435\u0448\u0430\u0435\u0442, \u043a\u0430\u043a \u043f\u043e\u043a\u0430\u0437\u044b\u0432\u0430\u0442\u044c \u0445\u043e\u0434
+        //  \u0438 \u0447\u0442\u043e \u0441\u0447\u0438\u0442\u0430\u0442\u044c \u043e\u0442\u043c\u0435\u043d\u043e\u0439. \u0417\u0434\u0435\u0441\u044c \u2014 \u0442\u043e\u043b\u044c\u043a\u043e \u0442\u043e\u0447\u043a\u0438, \u0432 \u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u043e\u0431 \u044d\u0442\u043e\u043c
+        //  \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e \u0441\u043f\u0440\u0430\u0448\u0438\u0432\u0430\u0442\u044c.
+        // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+        /// <summary>\u0425\u043e\u0434 \u0441\u0431\u043e\u0440\u0430: \u0441\u0434\u0435\u043b\u0430\u043d\u043e, \u0432\u0441\u0435\u0433\u043e, \u0447\u0442\u043e \u0438\u043c\u0435\u043d\u043d\u043e \u0441\u0435\u0439\u0447\u0430\u0441 \u0440\u0430\u0437\u0431\u0438\u0440\u0430\u0435\u0442\u0441\u044f.
+        /// \u041d\u043e\u043b\u044c \u0432 \u00ab\u0432\u0441\u0435\u0433\u043e\u00bb \u2014 \u044d\u0442\u0430\u043f \u0431\u0435\u0437 \u0441\u0447\u0451\u0442\u0447\u0438\u043a\u0430.</summary>
+        public Action<int, int, string> Progress;
+
+        /// <summary>\u0418\u043d\u0436\u0435\u043d\u0435\u0440 \u043d\u0430\u0436\u0430\u043b \u00ab\u041e\u0442\u043c\u0435\u043d\u0430\u00bb?</summary>
+        public Func<bool> CancelRequested;
+
+        private void ReportProgress(int done, int total, string what)
+        {
+            var handler = Progress;
+            if (handler == null) return;
+
+            try
+            {
+                handler(done, total, what);
+            }
+            catch (Exception ex)
+            {
+                // \u041f\u043e\u043a\u0430\u0437 \u0445\u043e\u0434\u0430 \u0440\u0430\u0431\u043e\u0442\u044b \u043d\u0435 \u0438\u043c\u0435\u0435\u0442 \u043f\u0440\u0430\u0432\u0430 \u0443\u0440\u043e\u043d\u0438\u0442\u044c \u0441\u0431\u043e\u0440.
+                Logger.Debug($"ReportProgress: {ex.Message}");
+            }
+        }
+
+        private void ThrowIfCancelled()
+        {
+            var ask = CancelRequested;
+            if (ask == null) return;
+
+            bool cancelled;
+            try
+            {
+                cancelled = ask();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"CancelRequested: {ex.Message}");
+                return;
+            }
+
+            if (cancelled)
+                throw new OperationCanceledException("\u0421\u0431\u043e\u0440 \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439 \u043f\u0440\u0435\u0440\u0432\u0430\u043d \u0438\u043d\u0436\u0435\u043d\u0435\u0440\u043e\u043c");
         }
 
 
@@ -733,9 +849,7 @@ namespace QOVETER.Services
                                     midPt.Y + outward.Y * d,
                                     midPt.Z + 1.0);
 
-                Room found = roomPhase != null
-                    ? doc.GetRoomAtPoint(probe, roomPhase)
-                    : doc.GetRoomAtPoint(probe);
+                Room found = RoomAtPointMeasured(doc, probe, roomPhase);
 
                 // Нашли своё же помещение — проба обогнула угол или нишу.
                 // Идти дальше в этом направлении бессмысленно.
@@ -777,7 +891,7 @@ namespace QOVETER.Services
             var probe = new XYZ(midPt.X + direction.X * offsetFt,
                                 midPt.Y + direction.Y * offsetFt,
                                 midPt.Z + 1.0);
-            var found = phase != null ? doc.GetRoomAtPoint(probe, phase) : doc.GetRoomAtPoint(probe);
+            var found = RoomAtPointMeasured(doc, probe, phase);
             return found != null && found.Id == room.Id;
         }
 
@@ -1921,9 +2035,7 @@ namespace QOVETER.Services
                         // GetRoomAtPoint работает по объёму, а не по плану.
                         probe = new XYZ(probe.X, probe.Y, corner.Z + probeFt);
 
-                        Room at = roomPhase != null
-                            ? doc.GetRoomAtPoint(probe, roomPhase)
-                            : doc.GetRoomAtPoint(probe);
+                        Room at = RoomAtPointMeasured(doc, probe, roomPhase);
 
                         if (at != null && at.Id == revitRoom.Id)
                         {
@@ -2039,10 +2151,14 @@ namespace QOVETER.Services
             int floors = 0, walls = 0;
             double floorAreaM2 = 0, wallAreaM2 = 0;
 
+            // Габариты планов считаются ОДИН раз на всё здание, а не заново
+            // на каждую пару помещений (см. RoomsBelowIndex).
+            var below = new RoomsBelowIndex(rooms);
+
             foreach (var room in rooms)
             {
                 // ── Пол по грунту ────────────────────────────────────────────
-                room.FloorOnGround = !HasRoomBelow(room, rooms);
+                room.FloorOnGround = !below.HasRoomBelow(room);
 
                 if (room.FloorOnGround && room.Area > 0)
                 {
@@ -2131,30 +2247,103 @@ namespace QOVETER.Services
         /// от грунта. Сравниваются габариты в плане: точная проверка пересечения
         /// многоугольников здесь не нужна, перекрытие плана этажами в жилом доме
         /// либо есть, либо его нет.
+        ///
+        /// <para><b>Почему это отдельный класс, а не метод.</b> Прежний
+        /// <c>HasRoomBelow(room, rooms)</c> на КАЖДУЮ пару помещений заново считал
+        /// габариты плана четырьмя проходами LINQ по всем точкам контура — то есть
+        /// порядка <i>помещений² × точек контура</i> вызовов делегата на здание.
+        /// На 76-СУЗДАЛ.23 (около 900 помещений) это секунды и в глаза не бросалось,
+        /// но растёт КВАДРАТОМ: на большом проекте сетевиков (отзыв 2026-08-26,
+        /// сбор около трёх часов) тех же помещений в разы больше, и цена растёт
+        /// в разы в квадрате.
+        ///
+        /// Здесь габариты считаются по одному разу на помещение, список сортируется
+        /// по отметке, и для каждого помещения просматривается только та часть,
+        /// что заведомо НИЖЕ его пола. Сравнения — голые double, без делегатов
+        /// и без выделения памяти. Правило отбора то же самое, до знака:
+        /// строгое перекрытие габаритов в плане и отметка ниже более чем на 0,5 м.</para>
         /// </summary>
-        private static bool HasRoomBelow(RoomData room, List<RoomData> rooms)
+        private sealed class RoomsBelowIndex
         {
-            if (room.FloorOutline == null || room.FloorOutline.Count < 3) return false;
+            private const double ToleranceM = 0.5;
 
-            double minX = room.FloorOutline.Min(p => p.X), maxX = room.FloorOutline.Max(p => p.X);
-            double minY = room.FloorOutline.Min(p => p.Y), maxY = room.FloorOutline.Max(p => p.Y);
+            // Помещения с пригодным контуром пола, по возрастанию отметки.
+            private readonly double[] _elevation;
+            private readonly double[] _minX;
+            private readonly double[] _minY;
+            private readonly double[] _maxX;
+            private readonly double[] _maxY;
 
-            const double toleranceM = 0.5;
-
-            foreach (var other in rooms)
+            public RoomsBelowIndex(List<RoomData> rooms)
             {
-                if (ReferenceEquals(other, room)) continue;
-                if (other.Elevation >= room.Elevation - toleranceM) continue;
-                if (other.FloorOutline == null || other.FloorOutline.Count < 3) continue;
+                var usable = new List<RoomData>(rooms.Count);
+                foreach (var room in rooms)
+                {
+                    if (room.FloorOutline != null && room.FloorOutline.Count >= 3)
+                        usable.Add(room);
+                }
+                usable.Sort((a, b) => a.Elevation.CompareTo(b.Elevation));
 
-                double oMinX = other.FloorOutline.Min(p => p.X), oMaxX = other.FloorOutline.Max(p => p.X);
-                double oMinY = other.FloorOutline.Min(p => p.Y), oMaxY = other.FloorOutline.Max(p => p.Y);
+                int n = usable.Count;
+                _elevation = new double[n];
+                _minX = new double[n];
+                _minY = new double[n];
+                _maxX = new double[n];
+                _maxY = new double[n];
 
-                bool overlaps = oMinX < maxX && oMaxX > minX && oMinY < maxY && oMaxY > minY;
-                if (overlaps) return true;
+                for (int i = 0; i < n; i++)
+                {
+                    var room = usable[i];
+                    double minX = double.MaxValue, minY = double.MaxValue;
+                    double maxX = double.MinValue, maxY = double.MinValue;
+
+                    foreach (var p in room.FloorOutline)
+                    {
+                        if (p.X < minX) minX = p.X;
+                        if (p.X > maxX) maxX = p.X;
+                        if (p.Y < minY) minY = p.Y;
+                        if (p.Y > maxY) maxY = p.Y;
+                    }
+
+                    _elevation[i] = room.Elevation;
+                    _minX[i] = minX; _minY[i] = minY;
+                    _maxX[i] = maxX; _maxY[i] = maxY;
+                }
             }
 
-            return false;
+            /// <summary>
+            /// Помещение без пригодного контура пола ответа не имеет: как и раньше,
+            /// такой пол считается лежащим на грунте (возвращается false).
+            /// </summary>
+            public bool HasRoomBelow(RoomData room)
+            {
+                if (room.FloorOutline == null || room.FloorOutline.Count < 3) return false;
+
+                double minX = double.MaxValue, minY = double.MaxValue;
+                double maxX = double.MinValue, maxY = double.MinValue;
+                foreach (var p in room.FloorOutline)
+                {
+                    if (p.X < minX) minX = p.X;
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y < minY) minY = p.Y;
+                    if (p.Y > maxY) maxY = p.Y;
+                }
+
+                double limit = room.Elevation - ToleranceM;
+
+                // Список отсортирован по отметке: как только дошли до помещения
+                // не ниже пола, ниже уже ничего не будет.
+                for (int i = 0; i < _elevation.Length; i++)
+                {
+                    if (_elevation[i] >= limit) break;
+
+                    if (_minX[i] < maxX && _maxX[i] > minX &&
+                        _minY[i] < maxY && _maxY[i] > minY)
+                        return true;
+                }
+
+                return false;
+            }
         }
 
         /// <summary>
@@ -2308,9 +2497,7 @@ namespace QOVETER.Services
                                         midPt.Y + outward.Y * dFt,
                                         midPt.Z + 1.0);
 
-                    Room behind = roomPhase != null
-                        ? doc.GetRoomAtPoint(probe, roomPhase)
-                        : doc.GetRoomAtPoint(probe);
+                    Room behind = RoomAtPointMeasured(doc, probe, roomPhase);
                     if (behind != null)
                     {
                         limitM = d;
@@ -2616,7 +2803,7 @@ namespace QOVETER.Services
         private static Room RoomAtProbe(XYZ midPt, XYZ outward, double distanceM, Phase phase, Document doc)
         {
             XYZ probe = ProbePoint(midPt, outward, distanceM);
-            return phase != null ? doc.GetRoomAtPoint(probe, phase) : doc.GetRoomAtPoint(probe);
+            return RoomAtPointMeasured(doc, probe, phase);
         }
 
         /// <summary>Чем закончилась проба наружу от грани колонны.</summary>
@@ -2682,9 +2869,7 @@ namespace QOVETER.Services
                                         midPt.Y + outward.Y * dFt,
                                         midPt.Z + 1.0);
 
-                    Room room = roomPhase != null
-                        ? doc.GetRoomAtPoint(probe, roomPhase)
-                        : doc.GetRoomAtPoint(probe);
+                    Room room = RoomAtPointMeasured(doc, probe, roomPhase);
 
                     if (room != null)
                     {
@@ -2748,7 +2933,39 @@ namespace QOVETER.Services
         /// по кубику вокруг пробной точки. Она применяется к нескольким кандидатам,
         /// а не ко всей модели, поэтому цена приемлема.</para>
         /// </summary>
+        /// <summary>
+        /// <c>GetRoomAtPoint</c> с замером. Через этот метод идут ВСЕ пробы
+        /// помещением: их число растёт и с числом помещений, и с числом сегментов
+        /// границы, поэтому в разборе долгого прогона важно знать не только
+        /// суммарное время, но и количество вызовов.
+        /// </summary>
+        private static Room RoomAtPointMeasured(Document doc, XYZ probe, Phase phase)
+        {
+            long started = Perf.Now;
+            try
+            {
+                return phase != null ? doc.GetRoomAtPoint(probe, phase) : doc.GetRoomAtPoint(probe);
+            }
+            finally
+            {
+                Perf.Add("GetRoomAtPoint", started);
+            }
+        }
+
         private static List<Wall> WallsAtPoint(Document doc, XYZ point, ElementId exclude)
+        {
+            long started = Perf.Now;
+            try
+            {
+                return WallsAtPointCore(doc, point, exclude);
+            }
+            finally
+            {
+                Perf.Add("WallsAtPoint", started);
+            }
+        }
+
+        private static List<Wall> WallsAtPointCore(Document doc, XYZ point, ElementId exclude)
         {
             var result = new List<Wall>();
 
@@ -2813,6 +3030,20 @@ namespace QOVETER.Services
         private static List<Wall> WallsAlongOutward(Document doc, XYZ midPt, XYZ outward,
                                                     double fromM, double toM)
         {
+            long started = Perf.Now;
+            try
+            {
+                return WallsAlongOutwardCore(doc, midPt, outward, fromM, toM);
+            }
+            finally
+            {
+                Perf.Add("WallsAlongOutward", started);
+            }
+        }
+
+        private static List<Wall> WallsAlongOutwardCore(Document doc, XYZ midPt, XYZ outward,
+                                                        double fromM, double toM)
+        {
             var result = new List<Wall>();
             try
             {
@@ -2873,8 +3104,49 @@ namespace QOVETER.Services
         /// а вывод из этого противоположный: в первом случае R задаёт инженер
         /// по разделу АР, во втором чинится проба.</para>
         /// </summary>
+        /// <summary>
+        /// Сколько раз за сбор объяснять «пусто» перебором ВСЕХ категорий.
+        ///
+        /// <para>Этот запрос — единственный в сборе, у которого нет фильтра
+        /// по категории: он и должен смотреть всё подряд, потому что отвечает
+        /// на вопрос «а что там вообще стоит». Цена соответствующая, и платится
+        /// она за КАЖДЫЙ сегмент, у которого впереди не нашлось стен.</para>
+        ///
+        /// <para>На 76-СУЗДАЛ.23 таких сегментов сотни, на большом проекте
+        /// сетевиков (отзыв 2026-08-26) их тысячи — а ответ у них один и тот же:
+        /// либо фасад смоделирован не стенами, либо впереди пусто. Двухсот
+        /// примеров для этого вывода достаточно; остальные считаются и попадают
+        /// в журнал числом, чтобы усечение не выглядело как «проверили всё».</para>
+        /// </summary>
+        private const int NonWallDescribeBudget = 200;
+
+        private static int _nonWallDescribeUsed;
+        private static int _nonWallDescribeSkipped;
+
         private static string DescribeNonWallsAhead(Document doc, XYZ midPt, XYZ outward,
                                                     double fromM, double toM)
+        {
+            if (_nonWallDescribeUsed >= NonWallDescribeBudget)
+            {
+                _nonWallDescribeSkipped++;
+                return "";
+            }
+
+            _nonWallDescribeUsed++;
+
+            long started = Perf.Now;
+            try
+            {
+                return DescribeNonWallsAheadCore(doc, midPt, outward, fromM, toM);
+            }
+            finally
+            {
+                Perf.Add("DescribeNonWallsAhead", started);
+            }
+        }
+
+        private static string DescribeNonWallsAheadCore(Document doc, XYZ midPt, XYZ outward,
+                                                        double fromM, double toM)
         {
             try
             {
