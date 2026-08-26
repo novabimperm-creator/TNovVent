@@ -156,6 +156,13 @@
                             <TextBlock Grid.Column="2" Text="%" Margin="3,0,0,0" VerticalAlignment="Center" Foreground="#FF7F8C8D"/>
                         </Grid>
                         <CheckBox x:Name="DetailedCalcCheck" Content="Детальный расчет" IsChecked="True" FontWeight="Normal"/>
+                        <!-- Формула (1) ТЗ: Q = Q огр + Q инф/вент − Q вн. Вычет по
+                             умолчанию ВЫКЛЮЧЕН: приборы отопления подбирают без него,
+                             запас идёт отдельной строкой. Но проектировщик в своём
+                             расчёте бытовые обычно вычитает, и без этой галочки
+                             сверка с ним идёт по разным формулам. -->
+                        <CheckBox x:Name="SubtractInternalGainsCheck" Content="Вычитать бытовые (для сверки)" IsChecked="False" FontWeight="Normal" Margin="0,4,0,0"
+                                  ToolTip="Бытовые тепловыделения (колонка «Q вн») вычитаются из итога, как в формуле (1) ТЗ. Для подбора приборов отопления галочку обычно снимают: тогда итог считается без вычета, с запасом."/>
                     </StackPanel>
                 </GroupBox>
                 

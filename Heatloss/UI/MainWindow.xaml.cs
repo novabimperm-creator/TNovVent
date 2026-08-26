@@ -1414,6 +1414,12 @@ namespace QOVETER.UI
                     SafetyFactor = 1.0 + safetyPercent / 100.0,
                     SelectedRooms = selectedRooms,
                     DetailedCalculation = DetailedCalcCheck.IsChecked ?? true,
+                    // До 2026-08-26 вычет бытовых был доступен только из кода, то есть
+                    // фактически всегда выключен. Инженер сравнивал наш итог с расчётом
+                    // проектировщика, у которого формула (1) идёт С вычетом, и разница
+                    // в бытовых (на реальном этаже это около 16% итога) выглядела
+                    // необъяснимой.
+                    SubtractInternalHeatGains = SubtractInternalGainsCheck.IsChecked ?? false,
                     BuildingParams = _buildingParams,
                     RoomTemperatures = _roomTemperatures,
                     // Воздухообмен по ТЗ — на квартиру. Помещения без номера квартиры
@@ -2014,6 +2020,7 @@ namespace QOVETER.UI
             OccupancyDensityBox.Text = "20";
             SafetyFactorCheck.IsChecked = true;
             DetailedCalcCheck.IsChecked = true;
+            SubtractInternalGainsCheck.IsChecked = false;
         }
 
         private void ShowErrorMessage(string message)
