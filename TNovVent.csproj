@@ -38,6 +38,15 @@
     <PackageReference Include="RBush.Signed" Version="4.0.0" />
   </ItemGroup>
 
+  <!-- ZipArchive для запасной сборки книги .xlsx (SimpleXlsxWriter): формат — это
+       zip с XML, и записать его можно средствами самого .NET, без ClosedXML.
+       Нужно там, где библиотек оформления рядом с плагином не оказалось.
+       На net48 System.IO.Compression в неявный набор ссылок не входит; на .NET 10
+       она часть платформы, и явная ссылка там не нужна. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="System.IO.Compression" />
+  </ItemGroup>
+
   <!-- Нормативные каталоги вшиты в сборку. Имена ресурсов заданы ЯВНО: по умолчанию
        SDK составил бы их из RootNamespace (TNovVent) и пути к папке, а код читает
        их по историческим именам QOVETER.Resources.* — те же имена стоят в тестах

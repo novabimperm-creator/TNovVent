@@ -90,6 +90,11 @@ namespace QOVETER.UI
             // Теперь окно открывается мгновенно, а модель читается ровно один раз —
             // по кнопке «Собрать помещения», уже с выбранным городом.
             ShowNotCollectedYet();
+
+            // Библиотеки экспорта ищем РЯДОМ С ПЛАГИНОМ, а не по общим правилам
+            // .NET: каталогом приложения для аддина является папка Revit.exe,
+            // и сборки, лежащие возле нашей DLL, штатным поиском находятся не всегда.
+            ExportLibraries.EnsureResolverInstalled();
             WarnIfExcelExportUnavailable();
             LoadCities();
 
@@ -138,26 +143,20 @@ namespace QOVETER.UI
         /// </summary>
         private void WarnIfExcelExportUnavailable()
         {
-            string missing = null;
-            foreach (string name in new[] { "ClosedXML", "DocumentFormat.OpenXml" })
-            {
-                try
-                {
-                    System.Reflection.Assembly.Load(name);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"Сборка {name} не загрузилась — выгрузка в Excel будет " +
-                                $"заменена на CSV: {ex.Message}");
-                    missing = name;
-                    break;
-                }
-            }
+            // Проверка идёт ПО ФАЙЛАМ рядом с плагином. Прежняя звала
+            // Assembly.Load("ClosedXML"), а этот вызов ищет в каталоге приложения —
+            // то есть рядом с Revit.exe, где библиотек плагина нет и быть не должно.
+            // Проверка могла объявить экспорт недоступным при исправной установке.
+            var missing = ExportLibraries.MissingFiles();
+            if (missing.Count == 0) return;
 
-            if (missing == null) return;
+            Logger.Warn(
+                $"Рядом с плагином нет {missing.Count} файлов библиотек Excel-экспорта " +
+                $"({string.Join(", ", missing)}). Книга будет собрана запасным путём — " +
+                $"без оформления. Папка плагина: {ExportLibraries.PluginDirectory}");
 
-            StatusText.Text += $"  ⚠ Выгрузка в Excel недоступна: рядом с плагином нет " +
-                               $"{missing}.dll. Результаты сохранятся в CSV.";
+            StatusText.Text += $"  ⚠ Рядом с плагином нет библиотек оформления Excel " +
+                               $"({missing.Count} файлов) — книга соберётся без оформления.";
         }
 
         private void LoadData()
@@ -607,10 +606,11 @@ namespace QOVETER.UI
 
         private void UpdateRoomsList()
         {
+            _roomListUpdating = true;
             try
             {
                 RoomsListBox.Items.Clear();
-                
+
                 var displayedRooms = GetDisplayedRooms();
                 if (displayedRooms.Count == 0)
                 {
@@ -624,22 +624,29 @@ namespace QOVETER.UI
                     return;
                 }
 
-                var stackPanel = new StackPanel();
-                
+                // Элементы кладутся В САМ СПИСОК, а не в StackPanel внутри ScrollViewer
+                // внутри ListBox.
+                //
+                // Вложенная прокрутка и была причиной жалобы «список не пролистывается
+                // до конца»: внутренний ScrollViewer с MaxHeight = 300 прокручивал
+                // своё содержимое, а сам оказывался выше видимой части списка —
+                // и нижние помещения не доставались ни колесом, ни полосой. Плюс
+                // одна огромная панель отменяла виртуализацию: на модели с тысячами
+                // помещений WPF создавал элементы управления на все сразу.
                 var selectAllCheckbox = new CheckBox
                 {
                     Content = "ВЫБРАТЬ ВСЕ",
                     FontWeight = FontWeights.Bold,
-                    IsChecked = true,
-                    Margin = new Thickness(0, 0, 0, 10),
+                    IsChecked = displayedRooms.All(r => r.IsSelected),
+                    Margin = new Thickness(0, 0, 0, 6),
                     Foreground = Brushes.Black,
                     Cursor = Cursors.Hand
                 };
-                
-                selectAllCheckbox.Checked += (s, e) => SelectAllRooms(true);
-                selectAllCheckbox.Unchecked += (s, e) => SelectAllRooms(false);
-                
-                stackPanel.Children.Add(selectAllCheckbox);
+
+                selectAllCheckbox.Checked += (s, e) => { if (!_roomListUpdating) SelectAllRooms(true); };
+                selectAllCheckbox.Unchecked += (s, e) => { if (!_roomListUpdating) SelectAllRooms(false); };
+
+                RoomsListBox.Items.Add(selectAllCheckbox);
 
                 // Помещения сгруппированы по квартирам: по ТЗ воздухообмен нормируется
                 // на квартиру, поэтому и выбирать помещения инженеру удобнее квартирами.
@@ -660,25 +667,31 @@ namespace QOVETER.UI
                         Foreground = Brushes.Black,
                         Cursor = Cursors.Hand
                     };
-                    stackPanel.Children.Add(header);
+                    RoomsListBox.Items.Add(header);
 
                     foreach (var room in groupRooms)
                     {
                         var roomCheckbox = new CheckBox
                         {
-                            Content = $"{room.Number} - {room.Name} ({room.Area:F1} м²)",
+                            Content = new TextBlock
+                            {
+                                Text = $"{room.Number} - {room.Name} ({room.Area:F1} м²)",
+                                TextTrimming = TextTrimming.CharacterEllipsis
+                            },
                             Tag = room.Id,
                             IsChecked = room.IsSelected,
                             Margin = new Thickness(20, 2, 0, 2),
                             Foreground = Brushes.Black,
-                            Cursor = Cursors.Hand
+                            Cursor = Cursors.Hand,
+                            ToolTip = $"{room.Number} — {room.Name}, {room.Area:F1} м², " +
+                                      $"{RoomCategoryHelper.GetRussianLabel(room.Category)}"
                         };
 
                         roomCheckbox.Checked += (s, e) => RoomCheckbox_Changed(s, e, room, true);
                         roomCheckbox.Unchecked += (s, e) => RoomCheckbox_Changed(s, e, room, false);
 
                         groupCheckboxes.Add(roomCheckbox);
-                        stackPanel.Children.Add(roomCheckbox);
+                        RoomsListBox.Items.Add(roomCheckbox);
                     }
 
                     // Заголовок переключает всю квартиру: снять галочку с общедомовых
@@ -687,21 +700,24 @@ namespace QOVETER.UI
                     header.Unchecked += (s, e) => { foreach (var cb in groupCheckboxes) cb.IsChecked = false; };
                 }
 
-                var scrollViewer = new ScrollViewer
-                {
-                    Content = stackPanel,
-                    MaxHeight = 300,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-                };
-                
-                RoomsListBox.Items.Add(scrollViewer);
                 UpdateSelectedRoomsCount();
             }
             catch (Exception ex)
             {
                 Logger.Error("Ошибка обновления списка помещений", ex);
             }
+            finally
+            {
+                _roomListUpdating = false;
+            }
         }
+
+        /// <summary>
+        /// Список перестраивается — галочки в нём сейчас отражают данные, а не выбор
+        /// инженера. Тот же сторож, что у легенды: иначе перестройка списка сама
+        /// меняла бы состав расчёта.
+        /// </summary>
+        private bool _roomListUpdating;
 
         /// <summary>
         /// Группирует помещения по квартирам для дерева в UI. Числовые номера
@@ -1088,24 +1104,73 @@ namespace QOVETER.UI
         /// элементом и масштабировалась вместе с планом — при увеличении уезжала
         /// за экран. Показываются только те категории, что есть на этаже.
         /// </summary>
+        /// <summary>
+        /// Перестройка легенды не должна выглядеть как действия инженера: снимая
+        /// и заново расставляя галочки, мы поднимаем те же события Checked/Unchecked,
+        /// что и щелчок мышью. Без этого флага обновление легенды меняло бы состав
+        /// расчёта — тот же класс ошибки, что был со списком помещений.
+        /// </summary>
+        private bool _legendUpdating;
+
         private void UpdateLegend(List<RoomData> rooms)
+        {
+            _legendUpdating = true;
+            try
+            {
+                BuildLegendItems(rooms);
+            }
+            finally
+            {
+                _legendUpdating = false;
+            }
+
+            int excluded = rooms.Count(r => !r.IsSelected);
+            ExcludedHint.Text = excluded > 0
+                ? $"Штриховкой — исключено из расчёта: {excluded}"
+                : "";
+            ExcludedHint.Visibility = excluded > 0
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
+
+            LegendPanel.Visibility = LegendItems.Children.Count > 0
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Легенда — она же фильтр по типам помещений на выбранном этаже.
+        ///
+        /// <para><b>Зачем.</b> Снять с расчёта все коридоры этажа можно было только
+        /// по одной галочке в списке помещений: на реальном этаже это десятки
+        /// щелчков, а на здании — сотни. При этом типы уже перечислены здесь,
+        /// рядом с планом, и инженер смотрит именно сюда, решая, что считать.</para>
+        ///
+        /// <para><b>Что означает состояние.</b> Галочка — «все помещения этого типа
+        /// на этаже идут в расчёт», пусто — «ни одно», серая (третье состояние) —
+        /// часть снята вручную поимённо. Третье состояние показывается, но щелчком
+        /// не выбирается: инженер задаёт «все» или «никого», а частичный набор
+        /// получается только поимённо.</para>
+        ///
+        /// <para>Фильтр действует на ТЕКУЩИЙ этаж — на тот набор, что показан
+        /// на плане. Так же работают кнопки «Выбрать все» и «Снять все».</para>
+        /// </summary>
+        private void BuildLegendItems(List<RoomData> rooms)
         {
             LegendItems.Children.Clear();
 
-            var categories = rooms
-                .Select(r => r.Category)
-                .Distinct()
-                .OrderBy(c => RoomCategoryHelper.GetRussianLabel(c), StringComparer.CurrentCulture)
+            var groups = rooms
+                .GroupBy(r => r.Category)
+                .OrderBy(g => RoomCategoryHelper.GetRussianLabel(g.Key), StringComparer.CurrentCulture)
                 .ToList();
 
-            foreach (var category in categories)
+            foreach (var group in groups)
             {
-                var item = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Margin = new Thickness(0, 1.5, 0, 1.5)
-                };
-                item.Children.Add(new WpfRectangle
+                var category = group.Key;
+                int total = group.Count();
+                int included = group.Count(r => r.IsSelected);
+
+                var content = new StackPanel { Orientation = Orientation.Horizontal };
+                content.Children.Add(new WpfRectangle
                 {
                     Width = 11,
                     Height = 11,
@@ -1117,27 +1182,73 @@ namespace QOVETER.UI
                     Margin = new Thickness(0, 0, 6, 0),
                     VerticalAlignment = VerticalAlignment.Center
                 });
-                item.Children.Add(new TextBlock
+                content.Children.Add(new TextBlock
                 {
                     Text = RoomCategoryHelper.GetRussianLabel(category),
                     FontSize = 11,
                     Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x34, 0x49, 0x5E)),
                     VerticalAlignment = VerticalAlignment.Center
                 });
-                LegendItems.Children.Add(item);
+                content.Children.Add(new TextBlock
+                {
+                    Text = included == total ? $"  {total}" : $"  {included}/{total}",
+                    FontSize = 10.5,
+                    Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0x95, 0xA5, 0xA6)),
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+
+                var box = new CheckBox
+                {
+                    Content = content,
+                    Tag = category,
+                    Margin = new Thickness(0, 1.5, 0, 1.5),
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    IsThreeState = false,
+                    IsChecked = included == 0 ? false
+                              : included == total ? true
+                              : (bool?)null,
+                    ToolTip = $"{RoomCategoryHelper.GetRussianLabel(category)}: " +
+                              $"в расчёте {included} из {total} на этом этаже. " +
+                              "Щелчок включает или снимает весь тип."
+                };
+
+                box.Checked   += LegendCategory_Changed;
+                box.Unchecked += LegendCategory_Changed;
+
+                LegendItems.Children.Add(box);
+            }
+        }
+
+        private void LegendCategory_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_legendUpdating) return;
+
+            var box = sender as CheckBox;
+            if (box == null || !(box.Tag is RoomCategory category)) return;
+
+            bool include = box.IsChecked == true;
+
+            var affected = GetDisplayedRooms().Where(r => r.Category == category).ToList();
+            foreach (var room in affected)
+            {
+                room.IsSelected = include;
+                RefreshRoomOnPlan(room);
             }
 
-            int excluded = rooms.Count(r => !r.IsSelected);
-            ExcludedHint.Text = excluded > 0
-                ? $"Штриховкой — исключено из расчёта: {excluded}"
-                : "";
-            ExcludedHint.Visibility = excluded > 0
-                ? System.Windows.Visibility.Visible
-                : System.Windows.Visibility.Collapsed;
+            // Список помещений и счётчик обязаны показать то же, что план: это один
+            // и тот же набор, просто изображённый двумя способами.
+            UpdateRoomsList();
+            UpdateSelectedRoomsCount();
+            UpdateLegend(GetDisplayedRooms());
 
-            LegendPanel.Visibility = categories.Count > 0
-                ? System.Windows.Visibility.Visible
-                : System.Windows.Visibility.Collapsed;
+            string label = RoomCategoryHelper.GetRussianLabel(category);
+            StatusText.Text = include
+                ? $"«{label}» возвращены в расчёт: {affected.Count} помещений на этаже"
+                : $"«{label}» сняты с расчёта: {affected.Count} помещений на этаже";
+            StatusText.Foreground = Brushes.Orange;
+
+            Logger.Info($"[Фильтр] тип «{label}» на этаже " +
+                        (include ? "включён" : "снят") + $": {affected.Count} помещений");
         }
 
         private void RoomPolygon_MouseEnter(object sender, MouseEventArgs e, RoomData room)
@@ -1166,8 +1277,89 @@ namespace QOVETER.UI
                 Canvas.SetZIndex(polygon, 3);
 
                 ScrollRoomIntoView(room.Id);
+                SelectRowInResults(room.Id);
                 UpdateSelectedRoomInfo(room);
             }
+        }
+
+        /// <summary>
+        /// План и таблица результатов показывают ОДИН набор помещений двумя способами,
+        /// поэтому выделение в них общее: щелчок по комнате на плане подсвечивает её
+        /// строку с теплопотерями, выбор строки — подсвечивает комнату на плане.
+        ///
+        /// <para>До этого связь была односторонней и неполной: щелчок по плану
+        /// прокручивал список помещений слева, а таблица справа — та, ради которой
+        /// расчёт и делается, — жила отдельно. Найти в ней строку помещения,
+        /// увиденного на плане, можно было только глазами по имени, а имена
+        /// в модели повторяются десятками («Жилая», «Коридор»).</para>
+        /// </summary>
+        private bool _syncingSelection;
+
+        private void SelectRowInResults(int roomId)
+        {
+            if (_syncingSelection || ResultsDataGrid.ItemsSource == null) return;
+
+            var row = ResultsDataGrid.ItemsSource
+                .OfType<CalculationResult>()
+                .FirstOrDefault(r => !r.IsSummary && r.RoomData != null && r.RoomData.Id == roomId);
+
+            if (row == null) return;   // расчёт ещё не делали либо строки этого этажа нет
+
+            _syncingSelection = true;
+            try
+            {
+                ResultsDataGrid.SelectedItem = row;
+                ResultsDataGrid.ScrollIntoView(row);
+            }
+            finally
+            {
+                _syncingSelection = false;
+            }
+        }
+
+        private void ResultsDataGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_syncingSelection) return;
+
+            var result = ResultsDataGrid.SelectedItem as CalculationResult;
+            if (result == null || result.IsSummary || result.RoomData == null) return;
+
+            _syncingSelection = true;
+            try
+            {
+                SelectRoomOnPlan(result.RoomData);
+            }
+            finally
+            {
+                _syncingSelection = false;
+            }
+        }
+
+        /// <summary>
+        /// Подсвечивает помещение на плане. Полигона может не быть вовсе — выбран
+        /// режим «Все этажи» либо строка относится к другому этажу; тогда выделение
+        /// просто снимается, а помещение называется в статусной строке.
+        /// </summary>
+        private void SelectRoomOnPlan(RoomData room)
+        {
+            if (_selectedPolygon != null && _selectedRoom != null)
+                ApplyRoomStyle(_selectedPolygon, _selectedRoom, RoomPlanState.Normal);
+
+            var polygon = _roomPolygons
+                .FirstOrDefault(p => p.Tag is int id && id == room.Id);
+
+            _selectedPolygon = polygon;
+            _selectedRoom = polygon != null ? room : null;
+
+            if (polygon != null)
+            {
+                ApplyRoomStyle(polygon, room, RoomPlanState.Selected);
+                Canvas.SetZIndex(polygon, 3);
+                polygon.BringIntoView();
+                ScrollRoomIntoView(room.Id);
+            }
+
+            UpdateSelectedRoomInfo(room);
         }
 
         /// <summary>
@@ -1185,15 +1377,14 @@ namespace QOVETER.UI
         {
             if (RoomsListBox.Items.Count == 0) return;
 
-            var scrollViewer = RoomsListBox.Items[0] as ScrollViewer;
-            var stackPanel = scrollViewer?.Content as StackPanel;
-            if (stackPanel == null) return;
-
-            foreach (var child in stackPanel.Children)
+            // Элементы лежат прямо в списке (см. UpdateRoomsList), поэтому прокрутка
+            // идёт средствами самого ListBox: при виртуализации контейнера у элемента
+            // может ещё не быть, и BringIntoView по нему ничего бы не дал.
+            foreach (var item in RoomsListBox.Items)
             {
-                if (child is CheckBox checkBox && checkBox.Tag is int id && id == roomId)
+                if (item is CheckBox checkBox && checkBox.Tag is int id && id == roomId)
                 {
-                    checkBox.BringIntoView();
+                    RoomsListBox.ScrollIntoView(checkBox);
                     break;
                 }
             }
@@ -1756,11 +1947,16 @@ namespace QOVETER.UI
                 }
                 catch (Exception ex) when (IsMissingExportLibrary(ex))
                 {
-                    // Библиотеки Excel-экспорта нет рядом с DLL плагина. Расчёт при
-                    // этом уже сделан и лежит в памяти — терять его из-за отсутствующего
+                    // Библиотек оформления рядом с DLL плагина нет. Расчёт при этом
+                    // уже сделан и лежит в памяти — терять его из-за отсутствующего
                     // файла нельзя: 2026-08-26 на большом проекте это означало бы
-                    // выбросить часы работы Revit. Пишем те же строки в CSV.
-                    SaveAsCsvFallback(dialog.FileName, exportParams, ex);
+                    // выбросить часы работы Revit.
+                    //
+                    // Собираем книгу САМИ: .xlsx — это zip с XML, и ни ZipArchive,
+                    // ни генерация XML сторонних сборок не требуют. Инженер получает
+                    // тот же файл с тем же расширением и теми же листами, просто
+                    // без заливок и примечаний. CSV остаётся последним рубежом.
+                    SaveAsPlainWorkbook(dialog.FileName, exportParams, ex);
                 }
                 finally
                 {
@@ -1798,8 +1994,51 @@ namespace QOVETER.UI
         }
 
         /// <summary>
-        /// Сохранить результаты в CSV, когда Excel-экспорт недоступен, и объяснить
-        /// инженеру, что именно случилось и что с этим делать.
+        /// Собрать книгу без библиотек оформления и объяснить инженеру, что именно
+        /// он получил и чего в этой книге нет.
+        ///
+        /// <para>Имя файла остаётся ТЕМ ЖЕ, что просил инженер: он собирался
+        /// открыть .xlsx, и подменять расширение на .csv, когда книгу можно собрать
+        /// самим, — значит перекладывать на него нашу проблему развёртывания.</para>
+        /// </summary>
+        private void SaveAsPlainWorkbook(string requestedPath, ExcelExportParams exportParams, Exception cause)
+        {
+            Logger.Warn("Библиотеки оформления Excel недоступны — книга собирается " +
+                        "запасным путём, без ClosedXML", cause);
+
+            try
+            {
+                var sheets = PlainReportBuilder.Build(_lastResults, exportParams);
+                SimpleXlsxWriter.Write(requestedPath, sheets);
+            }
+            catch (Exception plainEx)
+            {
+                // Не собралась и простая книга — остаётся CSV. Это уже не про
+                // оформление, а про то, чтобы числа вообще покинули память.
+                Logger.Error("Не удалась и запасная книга — уходим в CSV", plainEx);
+                SaveAsCsvFallback(requestedPath, exportParams, plainEx);
+                return;
+            }
+
+            var missing = ExportLibraries.MissingFiles();
+
+            MessageBox.Show(
+                $"Отчёт сохранён:\n{requestedPath}\n\n" +
+                "Книга собрана запасным путём: рядом с плагином нет библиотек оформления. " +
+                "Числа и состав листов те же, нет только заливок, рамок и примечаний " +
+                "к спорным ячейкам.\n\n" +
+                (missing.Count > 0
+                    ? "Чтобы вернуть оформление, положите рядом с плагином файлы:\n" +
+                      string.Join(", ", missing) + "\n\n"
+                    : "") +
+                $"Папка плагина:\n{ExportLibraries.PluginDirectory}",
+                "Отчёт сохранён",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        /// <summary>
+        /// Последний рубеж: CSV, когда не собралась даже простая книга.
         /// </summary>
         private void SaveAsCsvFallback(string requestedPath, ExcelExportParams exportParams, Exception cause)
         {
@@ -2089,6 +2328,84 @@ namespace QOVETER.UI
         /// инструкция: стены, их U, ориентации и площадь окон собираются в
         /// <c>GeometryCollector.CollectRoomsFromCurrentModel</c> при сборе помещений.
         /// </summary>
+        /// <summary>
+        /// Открывает журнал расчёта.
+        ///
+        /// <para><b>Почему кнопка понадобилась.</b> Журнал — единственное место,
+        /// где видно, ПОЧЕМУ получилось именно такое число: какой сегмент признан
+        /// наружным, какая L принята по квартире, какие узлы пропущены. Путь к нему
+        /// печатался на листе «Параметры» Excel-отчёта — то есть узнать его можно
+        /// было только после успешного экспорта, а когда экспорт и не срабатывал,
+        /// журнал приходилось искать по подсказке.</para>
+        ///
+        /// <para><b>Почему большой файл открывается папкой.</b> За прогон на большом
+        /// проекте журнал доходит до десятков мегабайт (на 76-СУЗДАЛ.23 — 68 МБ);
+        /// «Блокнот», который система назначает для .txt, на таком файле повисает.
+        /// Проводник с выделенным файлом даёт инженеру выбрать редактор — или сразу
+        /// отправить файл, что в этот момент нужно чаще.</para>
+        /// </summary>
+        private void OpenLog_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Хвост сессии живёт в буфере и до диска ещё не доехал: без сброса
+                // инженер открыл бы журнал без самых свежих строк — тех самых,
+                // ради которых он его и открывает.
+                Logger.Flush();
+
+                string path = Logger.LogFilePath;
+
+                if (!System.IO.File.Exists(path))
+                {
+                    string dir = System.IO.Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir)
+                        {
+                            UseShellExecute = true
+                        });
+                        StatusText.Text = "Журнала за сегодня ещё нет — открыта папка журналов";
+                        StatusText.Foreground = Brushes.Orange;
+                        return;
+                    }
+
+                    ShowErrorMessage(
+                        $"Журнал не найден:\n{path}\n\n" +
+                        (string.IsNullOrEmpty(Logger.LastError)
+                            ? "Файл появится после первого сбора или расчёта."
+                            : $"Последняя ошибка записи: {Logger.LastError}"));
+                    return;
+                }
+
+                var info = new System.IO.FileInfo(path);
+                const long tooBigForNotepad = 20L * 1024 * 1024;
+
+                if (info.Length > tooBigForNotepad)
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe")
+                    {
+                        Arguments = $"/select,\"{path}\"",
+                        UseShellExecute = true
+                    });
+                    StatusText.Text = $"Журнал {info.Length / 1024 / 1024} МБ — открыта папка, " +
+                                      "файл выделен (для такого размера нужен Notepad++ или VS Code)";
+                    StatusText.Foreground = Brushes.Orange;
+                    return;
+                }
+
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+                {
+                    UseShellExecute = true
+                });
+                StatusText.Text = $"Журнал открыт: {System.IO.Path.GetFileName(path)}";
+                StatusText.Foreground = Brushes.Green;
+            }
+            catch (Exception ex)
+            {
+                ShowErrorMessage($"Не удалось открыть журнал:\n{ex.Message}\n\n{Logger.LogFilePath}");
+            }
+        }
+
         private void ModelAudit_Click(object sender, RoutedEventArgs e)
         {
             if (_collecting) return;
@@ -2126,11 +2443,32 @@ namespace QOVETER.UI
 
                         var thermal = wallCalculator.Calculate(sample);
 
+                        // Площадь ТИПА — сумма по его экземплярам. Это главное число
+                        // аудита: оно отвечает на вопрос «сколько дома посчитано вот
+                        // этим U», а без него список типов не говорит о масштабе:
+                        // неутеплённый тип на сотнях квадратных метров и он же
+                        // на четырёх выглядели в списке одинаково.
+                        // HOST_AREA_COMPUTED у стены — площадь НЕТТО, проёмы уже вычтены.
+                        double areaTotal = 0;
+                        foreach (var wall in g)
+                        {
+                            try
+                            {
+                                var ap = wall.get_Parameter(BuiltInParameter.HOST_AREA_COMPUTED);
+                                if (ap != null && ap.HasValue)
+                                    areaTotal += UnitUtils.ConvertFromInternalUnits(
+                                        ap.AsDouble(), UnitTypeId.SquareMeters);
+                            }
+                            catch (Exception ex) { Logger.Debug($"[Аудит] площадь стены не прочитана: {ex.Message}"); }
+                        }
+
                         return new
                         {
                             TypeName = wt?.Name ?? "Неизвестно",
                             Function = funcName,
                             WidthMm = Math.Round(widthMm),
+                            AreaTotalSqM = Math.Round(areaTotal, 1),
+                            AreaAvgSqM = Math.Round(g.Count() > 0 ? areaTotal / g.Count() : 0, 1),
                             LayerCount = thermal.LayerCount,
                             RValue = Math.Round(thermal.RValue, 3),
                             UValue = Math.Round(thermal.UValue, 3),
@@ -2138,7 +2476,9 @@ namespace QOVETER.UI
                             Layers = thermal.LayerDescription
                         };
                     })
-                    .OrderByDescending(x => x.WidthMm)
+                    // По площади, а не по толщине: аудит читают сверху вниз, и первым
+                    // должен стоять тип, которым посчитана бо́льшая часть дома.
+                    .OrderByDescending(x => x.AreaTotalSqM)
                     .ToList();
 
                 // ══════════════════════════════════════════════════════════════
@@ -2224,13 +2564,17 @@ namespace QOVETER.UI
                             WidthMm = Math.Round(widthMm),
                             HeightMm = Math.Round(heightMm),
                             AreaSqM = Math.Round(areaSqM, 2),
+                            // Площадь всего остекления этого типа: она входит и в потери
+                            // через окна, и в вычет из площади стен, поэтому масштаб
+                            // типа виден только суммой.
+                            AreaTotalSqM = Math.Round(areaSqM * g.Count(), 1),
                             Chambers = chambers,
                             UValue = Math.Round(uVal, 3),
                             Orientation = orientation,
                             Count = g.Count()
                         };
                     })
-                    .OrderByDescending(x => x.AreaSqM)
+                    .OrderByDescending(x => x.AreaTotalSqM)
                     .ToList();
 
                 // ══════════════════════════════════════════════════════════════
@@ -2260,17 +2604,20 @@ namespace QOVETER.UI
                         }
                         catch (Exception ex) { Logger.Debug($"[Диагностика] Габариты двери не прочитаны: {ex.Message}"); }
 
+                        double doorAreaSqM = (widthMm / 1000.0) * (heightMm / 1000.0);
+
                         return new
                         {
                             Family = sym?.FamilyName ?? "—",
                             TypeName = sym?.Name ?? "—",
                             WidthMm = Math.Round(widthMm),
                             HeightMm = Math.Round(heightMm),
-                            AreaSqM = Math.Round((widthMm / 1000.0) * (heightMm / 1000.0), 2),
+                            AreaSqM = Math.Round(doorAreaSqM, 2),
+                            AreaTotalSqM = Math.Round(doorAreaSqM * g.Count(), 1),
                             Count = g.Count()
                         };
                     })
-                    .OrderByDescending(x => x.AreaSqM)
+                    .OrderByDescending(x => x.AreaTotalSqM)
                     .ToList();
 
                 // ══════════════════════════════════════════════════════════════
@@ -2328,11 +2675,17 @@ namespace QOVETER.UI
                 var tabControl = new TabControl { Margin = new Thickness(8) };
 
                 // ── Вкладка: Стены ──
-                var wallsTab = new TabItem { Header = $"🧱 Стены ({wallTypeGroups.Count} типов)" };
+                double wallAreaAll = wallTypeGroups.Sum(x => x.AreaTotalSqM);
+                var wallsTab = new TabItem
+                {
+                    Header = $"🧱 Стены ({wallTypeGroups.Count} типов, {wallAreaAll:N0} м²)"
+                };
                 var wallGrid = CreateScanDataGrid();
                 wallGrid.Columns.Add(MakeCol("Тип стены", "TypeName", 2));
-                wallGrid.Columns.Add(MakeCol("Функция", "Function", 1));
+                wallGrid.Columns.Add(MakeCol("Функция", "Function", 0.8));
                 wallGrid.Columns.Add(MakeCol("Толщина мм", "WidthMm", 0.6));
+                wallGrid.Columns.Add(MakeCol("S всего, м²", "AreaTotalSqM", 0.7));
+                wallGrid.Columns.Add(MakeCol("S одной, м²", "AreaAvgSqM", 0.6));
                 wallGrid.Columns.Add(MakeCol("R (м²·°C/Вт)", "RValue", 0.7));
                 wallGrid.Columns.Add(MakeCol("U (Вт/м²·°C)", "UValue", 0.7));
                 wallGrid.Columns.Add(MakeCol("Слоёв", "LayerCount", 0.4));
@@ -2343,13 +2696,18 @@ namespace QOVETER.UI
                 tabControl.Items.Add(wallsTab);
 
                 // ── Вкладка: Окна ──
-                var windowsTab = new TabItem { Header = $"🪟 Окна ({windowGroups.Count} типов)" };
+                double windowAreaAll = windowGroups.Sum(x => x.AreaTotalSqM);
+                var windowsTab = new TabItem
+                {
+                    Header = $"🪟 Окна ({windowGroups.Count} типов, {windowAreaAll:N0} м²)"
+                };
                 var winGrid = CreateScanDataGrid();
                 winGrid.Columns.Add(MakeCol("Семейство", "Family", 2));
                 winGrid.Columns.Add(MakeCol("Тип", "TypeName", 1.5));
                 winGrid.Columns.Add(MakeCol("Ширина мм", "WidthMm", 0.7));
                 winGrid.Columns.Add(MakeCol("Высота мм", "HeightMm", 0.7));
-                winGrid.Columns.Add(MakeCol("S (м²)", "AreaSqM", 0.5));
+                winGrid.Columns.Add(MakeCol("S одного, м²", "AreaSqM", 0.6));
+                winGrid.Columns.Add(MakeCol("S всего, м²", "AreaTotalSqM", 0.7));
                 winGrid.Columns.Add(MakeCol("Камер", "Chambers", 0.4));
                 winGrid.Columns.Add(MakeCol("U (Вт/м²·°C)", "UValue", 0.7));
                 winGrid.Columns.Add(MakeCol("Ориентация", "Orientation", 0.6));
@@ -2359,20 +2717,28 @@ namespace QOVETER.UI
                 tabControl.Items.Add(windowsTab);
 
                 // ── Вкладка: Двери ──
-                var doorsTab = new TabItem { Header = $"🚪 Двери ({doorGroups.Count} типов)" };
+                double doorAreaAll = doorGroups.Sum(x => x.AreaTotalSqM);
+                var doorsTab = new TabItem
+                {
+                    Header = $"🚪 Двери ({doorGroups.Count} типов, {doorAreaAll:N0} м²)"
+                };
                 var doorGrid = CreateScanDataGrid();
                 doorGrid.Columns.Add(MakeCol("Семейство", "Family", 2));
                 doorGrid.Columns.Add(MakeCol("Тип", "TypeName", 1.5));
                 doorGrid.Columns.Add(MakeCol("Ширина мм", "WidthMm", 0.7));
                 doorGrid.Columns.Add(MakeCol("Высота мм", "HeightMm", 0.7));
-                doorGrid.Columns.Add(MakeCol("S (м²)", "AreaSqM", 0.5));
+                doorGrid.Columns.Add(MakeCol("S одной, м²", "AreaSqM", 0.6));
+                doorGrid.Columns.Add(MakeCol("S всего, м²", "AreaTotalSqM", 0.7));
                 doorGrid.Columns.Add(MakeCol("Кол-во", "Count", 0.4));
                 doorGrid.ItemsSource = doorGroups;
                 doorsTab.Content = doorGrid;
                 tabControl.Items.Add(doorsTab);
 
                 // ── Вкладка: Помещения ──
-                var roomsTab = new TabItem { Header = $"🏠 Помещения ({roomList.Count})" };
+                var roomsTab = new TabItem
+                {
+                    Header = $"🏠 Помещения ({roomList.Count}, {roomList.Sum(x => x.AreaSqM):N0} м²)"
+                };
                 var roomGrid = CreateScanDataGrid();
                 roomGrid.Columns.Add(MakeCol("Номер", "Number", 0.5));
                 roomGrid.Columns.Add(MakeCol("Название", "Name", 2));

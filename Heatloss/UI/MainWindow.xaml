@@ -191,7 +191,22 @@
                             <TextBlock x:Name="RoomCountText" Text="Всего: 0" Foreground="#FF7F8C8D"/>
                         </StackPanel>
                         
-                        <ListBox Grid.Row="1" x:Name="RoomsListBox" ScrollViewer.VerticalScrollBarVisibility="Auto" BorderBrush="#FFD1D8E0" Margin="0,0,0,10" Background="White" Foreground="Black"/>
+                        <!-- Горизонтальная прокрутка выключена намеренно: длинное имя
+                             помещения растягивало содержимое, внизу появлялась вторая
+                             полоса и съедала высоту списка. Имена обрезаются, полное
+                             видно во всплывающей подсказке.
+
+                             VirtualizationMode — Standard, а не Recycling: элементами
+                             списка служат готовые CheckBox, а переработка контейнеров
+                             подставляла бы один и тот же элемент в разные контейнеры
+                             и роняла WPF на «у элемента уже есть родитель». -->
+                        <ListBox Grid.Row="1" x:Name="RoomsListBox"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Standard"
+                                 BorderBrush="#FFD1D8E0" Margin="0,0,0,10"
+                                 Background="White" Foreground="Black"/>
                         
                         <Grid Grid.Row="2">
                             <Grid.ColumnDefinitions>
@@ -212,6 +227,10 @@
                          обзор типов стен/окон/дверей модели. Стены и окна помещений
                          собираются кнопкой «Собрать помещения». -->
                     <Button x:Name="ModelAuditButton" Content="🔍 Аудит модели" Height="35" Margin="0,0,0,8" Click="ModelAudit_Click" Style="{StaticResource ButtonStyle}" Background="#FF8E44AD" ToolTip="Справочный обзор типов стен, окон и дверей модели. На расчёт не влияет."/>
+                    <!-- Журнал лежит в %APPDATA%\QOVETER\logs и до сих пор открывался
+                         только вручную: путь печатался на листе «Параметры» отчёта,
+                         то есть узнать его можно было лишь после успешного экспорта. -->
+                    <Button x:Name="OpenLogButton" Content="📄 Открыть журнал" Height="30" Margin="0,0,0,8" Click="OpenLog_Click" Style="{StaticResource ButtonStyle}" Background="#FF7F8C8D" ToolTip="Журнал расчёта: почему стена считалась наружной, какая L принята по квартире, какие узлы пропущены. Большой файл открывается папкой — «Блокнот» его не потянет."/>
                     <Button x:Name="CalculateButton" Content="⚡ Рассчитать теплопотери" Height="45" Margin="0,0,0,8" Click="CalculateAll_Click" Style="{StaticResource PrimaryButtonStyle}" FontSize="15"/>
                     <!-- Ход сбора и отмена. Пока сбор не идёт, обе строки скрыты:
                          на большом проекте обход модели идёт десятки минут, и
@@ -260,15 +279,24 @@
                                 Margin="10" Padding="10,8"
                                 Background="#F2FFFFFF" BorderBrush="#FFD1D8E0"
                                 BorderThickness="1" CornerRadius="6"
-                                Visibility="Collapsed" IsHitTestVisible="False">
+                                Visibility="Collapsed" MaxHeight="340">
+                            <!-- IsHitTestVisible снят: легенда стала фильтром, и по её
+                                 строкам теперь щёлкают. Пока она была нарисованной
+                                 подписью, щелчки по ней должны были доставаться плану. -->
                             <Border.Effect>
                                 <DropShadowEffect Color="#FF2C3E50" BlurRadius="10"
                                                   ShadowDepth="1" Opacity="0.13"/>
                             </Border.Effect>
                             <StackPanel>
                                 <TextBlock Text="ТИПЫ ПОМЕЩЕНИЙ" FontSize="9.5" FontWeight="SemiBold"
-                                           Foreground="#FF95A5A6" Margin="0,0,0,6"/>
-                                <StackPanel x:Name="LegendItems"/>
+                                           Foreground="#FF95A5A6" Margin="0,0,0,2"/>
+                                <TextBlock Text="галочка — тип идёт в расчёт" FontSize="9.5"
+                                           Foreground="#FFB2BEC3" Margin="0,0,0,6"/>
+                                <!-- Типов на этаже бывает полтора десятка: без прокрутки
+                                     нижние уходили бы за край плана. -->
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="260">
+                                    <StackPanel x:Name="LegendItems"/>
+                                </ScrollViewer>
                                 <TextBlock x:Name="ExcludedHint" FontSize="10.5" Foreground="#FF95A5A6"
                                            Margin="0,6,0,0" Visibility="Collapsed"/>
                             </StackPanel>
@@ -312,7 +340,12 @@
                 <TextBlock Grid.Row="0" Text="Результаты расчета" FontSize="20" FontWeight="Bold" Foreground="#FF2C3E50" Margin="0,0,0,15"/>
                 <TextBlock Grid.Row="1" x:Name="ResultsSummary" Text="Готов к расчету" Margin="0,0,0,15" Foreground="#FF34495E" FontSize="14"/>
                 
-                <DataGrid Grid.Row="2" x:Name="ResultsDataGrid" Margin="0,0,0,15" MouseDoubleClick="ResultsDataGrid_MouseDoubleClick">
+                <!-- SelectionChanged: выделение строки подсвечивает помещение на плане,
+                     и наоборот. План и таблица — один набор, показанный дважды. -->
+                <DataGrid Grid.Row="2" x:Name="ResultsDataGrid" Margin="0,0,0,15"
+                          SelectionMode="Single" SelectionUnit="FullRow"
+                          MouseDoubleClick="ResultsDataGrid_MouseDoubleClick"
+                          SelectionChanged="ResultsDataGrid_SelectionChanged">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Помещение" Binding="{Binding RoomName}" Width="2*"/>
                         <DataGridTextColumn Header="Кв." Binding="{Binding Apartment}" Width="0.7*"/>

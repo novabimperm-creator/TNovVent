@@ -225,22 +225,25 @@ namespace QOVETER.Services
             if (parameters.UseApartmentGrouping ||
                 parameters.Ventilation == VentilationMethod.AirChangeRate)
             {
+                // Нумерация квартир бывает СКВОЗНОЙ по дому, а бывает своей на каждом
+                // этаже. Во втором случае номер сам по себе квартиру не определяет,
+                // и группировка по одному номеру сливает в «квартиру 1» весь стояк.
+                bool perLevel = UsesPerLevelNumbering(
+                    parameters.ApartmentComposition ?? computations.Select(c => c.Room).ToList());
+
                 var apartments = computations
                     .Where(c => !string.IsNullOrWhiteSpace(c.Room.Apartment))
-                    .GroupBy(c => c.Room.Apartment.Trim())
+                    .GroupBy(c => ApartmentKey(c.Room, perLevel))
                     .ToList();
 
                 foreach (var apartment in apartments)
                 {
                     var rooms = apartment.ToList();
 
-                    // Квартира — это ОДНА строка номера. Если в модели номера
-                    // повторяются (две секции в одном файле, нумерация с начала на
-                    // каждом этаже), разные квартиры сольются в одну, и
-                    // L = max(Σ приток, Σ вытяжка) посчитается по объединённому
-                    // набору помещений — норма выйдет заниженной, потому что max
-                    // берётся один раз вместо двух. Молча этого допускать нельзя:
-                    // признак слияния — помещения одной квартиры на разных уровнях.
+                    // Помещения одной квартиры на разных уровнях: при поэтажной
+                    // нумерации уровень уже входит в ключ, поэтому сюда доходят
+                    // только настоящие двухуровневые квартиры — либо сквозная
+                    // нумерация, в которой номера всё-таки повторяются.
                     var levels = rooms
                         .Select(c => c.Room.LevelId)
                         .Distinct()
@@ -248,14 +251,14 @@ namespace QOVETER.Services
                     if (levels.Count > 1)
                     {
                         Logger.Warn(
-                            $"[Квартира {apartment.Key}] помещения на {levels.Count} разных уровнях " +
+                            $"[Квартира {rooms[0].Room.Apartment}] помещения на {levels.Count} разных уровнях " +
                             $"({string.Join(", ", rooms.Select(c => c.Room.LevelName).Distinct())}) — " +
                             "либо двухуровневая квартира, либо номера квартир в модели " +
                             "повторяются и разные квартиры слиты в одну. Проверьте параметр " +
                             "номера квартиры: воздухообмен считается на объединённый набор.");
                     }
 
-                    AssignApartmentVentilation(apartment.Key, rooms, parameters);
+                    AssignApartmentVentilation(apartment.Key, rooms, parameters, perLevel);
                 }
 
                 perRoom = computations
@@ -315,21 +318,103 @@ namespace QOVETER.Services
         }
 
         /// <summary>
+        /// Выше этого удельного расхода норма квартиры считается неправдоподобной,
+        /// м³/(ч·м²). Типовой диапазон 2…6; порог взят с двукратным запасом, чтобы
+        /// не срабатывать на планировках с большой долей санузлов.
+        /// </summary>
+        private const double ImplausibleAirFlowPerM2 = 12.0;
+
+        /// <summary>
+        /// Разделитель номера и уровня в ключе квартиры. Управляющий символ, а не
+        /// дефис: номера квартир в моделях бывают составными («1-5-13»), и любой
+        /// печатный разделитель однажды встретился бы внутри самого номера.
+        /// </summary>
+        private const char LevelSeparator = '';
+
+        /// <summary>
+        /// Ключ квартиры. При поэтажной нумерации в него входит УРОВЕНЬ: номер сам
+        /// по себе квартиру тогда не определяет.
+        /// </summary>
+        private static string ApartmentKey(RoomData room, bool perLevel)
+        {
+            string number = (room.Apartment ?? "").Trim();
+            return perLevel ? number + LevelSeparator + room.LevelId : number;
+        }
+
+        /// <summary>Номер квартиры из ключа — для журнала и отчёта.</summary>
+        private static string ApartmentNumber(string key)
+        {
+            int separator = key.IndexOf(LevelSeparator);
+            return separator < 0 ? key : key.Substring(0, separator);
+        }
+
+        /// <summary>
+        /// Нумерация квартир в модели — своя на каждом этаже?
+        ///
+        /// <para><b>Что это чинит.</b> Отзыв 2026-08-27:
+        /// у трёх помещений одной квартиры Q вент вышел кратно выше ожидаемого.
+        /// Обратный счёт дал L около 560 м³/ч на квартиру из трёх комнат при норме
+        /// около 70. Причина не в формуле: номера квартир в проекте шли с единицы
+        /// НА КАЖДОМ ЭТАЖЕ, группировка шла по одной строке номера,
+        /// и под одним номером собрался весь стояк. Норма считалась по объединённому
+        /// набору всех этажей, а раздавалась комнатам одного — тем, что были
+        /// в расчёте.</para>
+        ///
+        /// <para><b>Критерий.</b> Если БОЛЬШИНСТВО номеров встречается более чем
+        /// на одном уровне — это поэтажная нумерация. Двухуровневых квартир
+        /// большинством не бывает: они единичны в любом доме, а здесь повторяется
+        /// каждый номер. Порог намеренно грубый, потому что различие качественное,
+        /// а не количественное.</para>
+        ///
+        /// <para>Решение всегда пишется в журнал: оно меняет числа отчёта,
+        /// и инженер должен видеть, какую нумерацию плагин распознал.</para>
+        /// </summary>
+        internal static bool UsesPerLevelNumbering(IList<RoomData> rooms)
+        {
+            if (rooms == null || rooms.Count == 0) return false;
+
+            var byNumber = rooms
+                .Where(r => r != null && !string.IsNullOrWhiteSpace(r.Apartment))
+                .GroupBy(r => r.Apartment.Trim())
+                .ToList();
+
+            if (byNumber.Count == 0) return false;
+
+            int multiLevel = byNumber.Count(g => g.Select(r => r.LevelId).Distinct().Count() > 1);
+            bool perLevel = multiLevel * 2 > byNumber.Count;
+
+            Logger.Info(
+                $"[Квартиры] номеров {byNumber.Count}, из них встречаются на нескольких " +
+                $"уровнях {multiLevel} → нумерация " +
+                (perLevel
+                    ? "ПОЭТАЖНАЯ: квартирой считается номер В ПРЕДЕЛАХ ЭТАЖА, иначе " +
+                      "весь стояк слился бы в одну квартиру и норма воздухообмена " +
+                      "выросла бы кратно числу этажей"
+                    : "сквозная по дому: квартира определяется одним номером"));
+
+            return perLevel;
+        }
+
+        /// <summary>
         /// Помещения, по которым нормируется воздухообмен квартиры: полный состав
         /// из <see cref="CalculationParameters.ApartmentComposition"/>, если он передан,
         /// иначе — то, что пришло на расчёт.
         /// </summary>
         private static List<RoomData> ResolveApartmentComposition(
-            string apartment, List<RoomComputation> rooms, CalculationParameters parameters)
+            string apartmentKey, List<RoomComputation> rooms, CalculationParameters parameters,
+            bool perLevel)
         {
             var inCalculation = rooms.Select(c => c.Room).ToList();
 
             var all = parameters.ApartmentComposition;
             if (all == null || all.Count == 0) return inCalculation;
 
+            // Состав берётся по ТОМУ ЖЕ ключу, что и группировка. Иначе при поэтажной
+            // нумерации норма считалась бы по всем этажам сразу, а раздавалась
+            // помещениям одного — ровно тот дефект, что кратно завышал расход.
             var full = all
                 .Where(r => !string.IsNullOrWhiteSpace(r.Apartment) &&
-                            string.Equals(r.Apartment.Trim(), apartment, StringComparison.Ordinal))
+                            string.Equals(ApartmentKey(r, perLevel), apartmentKey, StringComparison.Ordinal))
                 .ToList();
 
             if (full.Count == 0) return inCalculation;
@@ -341,21 +426,24 @@ namespace QOVETER.Services
                     .Select(r => $"{r.Number} «{r.Name}»")
                     .ToList();
                 Logger.Debug(
-                    $"[Квартира {apartment}] норма воздухообмена считается по полному составу " +
-                    $"({full.Count} помещений); вне расчёта: {string.Join(", ", excluded)}");
+                    $"[Квартира {ApartmentNumber(apartmentKey)}] норма воздухообмена считается " +
+                    $"по полному составу ({full.Count} помещений); " +
+                    $"вне расчёта: {string.Join(", ", excluded)}");
             }
 
             return full;
         }
 
-        private void AssignApartmentVentilation(string apartment, List<RoomComputation> rooms,
-                                                CalculationParameters parameters)
+        private void AssignApartmentVentilation(string apartmentKey, List<RoomComputation> rooms,
+                                                CalculationParameters parameters, bool perLevel)
         {
+            string apartment = ApartmentNumber(apartmentKey);
+
             // Норма считается по ПОЛНОМУ составу квартиры, а не по тому, что осталось
             // в расчёте: санузел, снятый инженером с расчёта, из квартиры никуда
             // не делся и продолжает определять вытяжную норму. Раньше снятая галочка
             // уменьшала L и молча срезала мощность у остальных комнат этой квартиры.
-            var normRooms = ResolveApartmentComposition(apartment, rooms, parameters);
+            var normRooms = ResolveApartmentComposition(apartmentKey, rooms, parameters, perLevel);
 
             double supply = normRooms
                 .Where(r => ThermalConstants.SupplyRatedCategories.Contains(r.Category))
@@ -367,6 +455,29 @@ namespace QOVETER.Services
 
             double airFlow = Math.Max(supply, exhaust);
             double apartmentInternalHeat = rooms.Sum(c => c.QVn);
+
+            // ── Сторож на неправдоподобную норму ───────────────────────────────
+            //
+            // Удельный расход квартиры лежит в пределах 2…6 м³/(ч·м²): приток жилых
+            // нормируется тремя, вытяжка кухни и санузлов на типовой планировке даёт
+            // примерно столько же. Значение вдвое выше верхней границы означает
+            // не планировку, а СОСТАВ: в квартиру попали помещения, которые к ней
+            // не относятся.
+            //
+            // Ровно это и случилось по отзыву 2026-08-27: номера квартир повторялись
+            // на каждом этаже, под одним номером слился весь стояк, и комнаты
+            // одного этажа получили норму всего стояка. В отчёт это ушло числом,
+            // которое ничем себя не выдавало.
+            double normArea = normRooms.Sum(r => r.Area);
+            if (normArea > 0 && airFlow / normArea > ImplausibleAirFlowPerM2)
+            {
+                Logger.Warn(
+                    $"[Квартира {apartment}] L = {airFlow:F0} м³/ч на {normArea:F1} м² — " +
+                    $"{airFlow / normArea:F1} м³/(ч·м²) при типовых 2…6. Помещений в норме " +
+                    $"{normRooms.Count}, уровней {normRooms.Select(r => r.LevelId).Distinct().Count()}. " +
+                    "Проверьте параметр номера квартиры: похоже, под одним номером " +
+                    "собрались помещения РАЗНЫХ квартир, и норма посчитана на объединённый набор.");
+            }
 
             // Приборы стоят у окон — туда и уходит нагрузка. Если окон в квартире нет
             // вообще (внутренняя квартира-студия без остекления — в жилых домах не бывает,
