@@ -18,6 +18,8 @@ using System.Windows.Threading;
 using WpfGrid = System.Windows.Controls.Grid;
 using WpfRectangle = System.Windows.Shapes.Rectangle;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.UI
 {
     public partial class MainWindow : Window
@@ -2428,7 +2430,7 @@ namespace QOVETER.UI
                 var wallCalculator = new WallThermalCalculator(_document);
 
                 var wallTypeGroups = allWalls
-                    .GroupBy(w => w.WallType?.Id?.IntegerValue ?? -1)
+                    .GroupBy(w => w.WallType?.Id?.IntValue() ?? -1)
                     .Select(g =>
                     {
                         var sample = g.First();
@@ -2492,7 +2494,7 @@ namespace QOVETER.UI
                     .ToList();
 
                 var windowGroups = allWindows
-                    .GroupBy(w => w.Symbol?.Id?.IntegerValue ?? -1)
+                    .GroupBy(w => w.Symbol?.Id?.IntValue() ?? -1)
                     .Select(g =>
                     {
                         var sample = g.First();
@@ -2588,7 +2590,7 @@ namespace QOVETER.UI
                     .ToList();
 
                 var doorGroups = allDoors
-                    .GroupBy(d => d.Symbol?.Id?.IntegerValue ?? -1)
+                    .GroupBy(d => d.Symbol?.Id?.IntValue() ?? -1)
                     .Select(g =>
                     {
                         var sample = g.First();

@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -44,7 +46,7 @@ namespace QOVETER.Services
 
                     levels.Add(new LevelInfo
                     {
-                        Id          = level.Id.IntegerValue,
+                        Id          = level.Id.IntValue(),
                         Name        = level.Name ?? $"Уровень {floorIndex}",
                         Elevation   = elevationM,
                         FloorNumber = floorIndex   // порядковый номер по сортировке, а не по отметке

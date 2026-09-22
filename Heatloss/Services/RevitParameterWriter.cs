@@ -6,6 +6,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -79,7 +81,7 @@ namespace QOVETER.Services
             }
 
             var byId = targets.Elements
-                .GroupBy(e => e.Id.IntegerValue)
+                .GroupBy(e => e.Id.IntValue())
                 .ToDictionary(g => g.Key, g => g.First());
             var byNumber = BuildNumberIndex(targets.Elements);
 

@@ -2,6 +2,8 @@ using System;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -133,7 +135,7 @@ namespace QOVETER.Services
                             foreach (var insertId in inserts)
                             {
                                 var inserted = doc.GetElement(insertId);
-                                if (inserted?.Category?.Id?.IntegerValue == (int)BuiltInCategory.OST_Windows)
+                                if (inserted?.Category?.Id?.IntValue() == (int)BuiltInCategory.OST_Windows)
                                 {
                                     firstWallWithWindow = wall;
                                     break;

@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -387,7 +389,7 @@ namespace QOVETER.Services
             if (rooms.Count == 0) return rooms;
 
             var byPhase = rooms
-                .GroupBy(r => ElementCollectorService.GetRoomPhase(r)?.Id?.IntegerValue ?? -1)
+                .GroupBy(r => ElementCollectorService.GetRoomPhase(r)?.Id?.IntValue() ?? -1)
                 .ToList();
 
             if (byPhase.Count <= 1) return rooms;
@@ -400,7 +402,7 @@ namespace QOVETER.Services
                 for (int i = 0; i < phases.Size; i++)
                 {
                     var phase = phases.get_Item(i);
-                    if (phase != null) order[phase.Id.IntegerValue] = i;
+                    if (phase != null) order[phase.Id.IntValue()] = i;
                 }
             }
             catch (Exception ex)
@@ -854,7 +856,7 @@ namespace QOVETER.Services
                 // Нашли своё же помещение — проба обогнула угол или нишу.
                 // Идти дальше в этом направлении бессмысленно.
                 if (found != null)
-                    return found.Id.IntegerValue == room.Id.IntegerValue ? null : found;
+                    return found.Id.IntValue() == room.Id.IntValue() ? null : found;
 
                 // Помещения нет. Если точка всё ещё в теле конструкции — здание
                 // не кончилось, шагаем дальше. Если пусто — вышли наружу либо
@@ -974,8 +976,8 @@ namespace QOVETER.Services
                 return;
             }
 
-            var windowsByHost = roomData.Windows.ToLookup(w => w.HostWallId?.IntegerValue ?? -1);
-            var doorsByHost   = roomData.Doors  .ToLookup(d => d.HostWallId?.IntegerValue ?? -1);
+            var windowsByHost = roomData.Windows.ToLookup(w => w.HostWallId?.IntValue() ?? -1);
+            var doorsByHost   = roomData.Doors  .ToLookup(d => d.HostWallId?.IntValue() ?? -1);
 
             // Проёмы, уже вычтенные из какого-то сегмента этого помещения. Одну несущую
             // стену закрывает несколько полос отделки, и у стыка окно попадает в допуск
@@ -1076,7 +1078,7 @@ namespace QOVETER.Services
                                     doc, out columnOutRoom, out columnCover);
 
                                 string columnHead =
-                                    $"  Seg ElemId={wallElemId.IntegerValue} → КОЛОННА " +
+                                    $"  Seg ElemId={wallElemId.IntValue()} → КОЛОННА " +
                                     $"«{boundaryElement.Name}» L={segLenMeters:F2}м";
 
                                 // За гранью отапливаемый объём (в том числе САМО это
@@ -1144,7 +1146,7 @@ namespace QOVETER.Services
                                         FloorNumber = roomData.FloorNumber,
                                         AdjacentCategory = columnAdjacent,
                                         AdjacentRoomId   = columnAdjacent.HasValue && columnOutRoom != null
-                                                           ? columnOutRoom.Id.IntegerValue : 0
+                                                           ? columnOutRoom.Id.IntValue() : 0
                                     });
 
                                     // В счёт «наружных стен» колонна НЕ идёт: это фрагмент
@@ -1164,7 +1166,7 @@ namespace QOVETER.Services
                             // Длина и то, что за сегментом, — чтобы было видно, теряется
                             // ли на этом реальная площадь ограждения.
                             Logger.Debug(
-                                $"  Seg ElemId={wallElemId.IntegerValue} " +
+                                $"  Seg ElemId={wallElemId.IntValue()} " +
                                 $"→ НЕ СТЕНА ({boundaryElement?.Category?.Name ?? "нет элемента"}" +
                                 $"{(boundaryElement != null ? $", «{boundaryElement.Name}»" : "")}) " +
                                 $"L={segLenMeters:F2}м " +
@@ -1198,7 +1200,7 @@ namespace QOVETER.Services
                                 funcIsExterior = !excluded;
                             }
                         }
-                        catch (Exception ex) { Logger.Debug($"Wall.Function недоступен для {wall.Id.IntegerValue}: {ex.Message}"); }
+                        catch (Exception ex) { Logger.Debug($"Wall.Function недоступен для {wall.Id.IntValue()}: {ex.Message}"); }
 
                         // Критерий 5: навесная стена (витраж). У её типа Function часто
                         // не выставлена вовсе (`func=False` в журнале), слоёв нет,
@@ -1208,7 +1210,7 @@ namespace QOVETER.Services
                         bool isCurtainWall = IsCurtainWall(wall);
 
                         // Критерий 3: в этот сегмент стены вставлено окно → 100% наружная
-                        bool hasHostedWindow = windowsByHost[wallElemId.IntegerValue].Any();
+                        bool hasHostedWindow = windowsByHost[wallElemId.IntValue()].Any();
 
                         // Критерий 4: отделочный слой (штукатурка, гипс и т.п.) на границе помещения.
                         // Отделка сама по себе не несущая и не имеет "наруж" в имени,
@@ -1309,18 +1311,18 @@ namespace QOVETER.Services
                         // значение категории (СП 50.13330 п. 5.2). У шахты помещения
                         // нет, поэтому 0 — там остаётся таблица.
                         int adjacentRoomId = (!facesShaft && unheatedNeighbour && outRoom != null)
-                            ? outRoom.Id.IntegerValue
+                            ? outRoom.Id.IntValue()
                             : 0;
 
                         if (facesShaft)
                         {
                             _shaftFacesDetected++;
                             Logger.Debug(
-                                $"  Seg WallId={wallElemId.IntegerValue} «{wallTypeName}» → ШАХТА: {shaftNote}");
+                                $"  Seg WallId={wallElemId.IntValue()} «{wallTypeName}» → ШАХТА: {shaftNote}");
                         }
 
                         Logger.Debug(
-                            $"  Seg WallId={wallElemId.IntegerValue} " +
+                            $"  Seg WallId={wallElemId.IntValue()} " +
                             $"Type=\"{wallTypeName}\" " +
                             $"name={nameIsExterior} func={funcIsExterior} win={hasHostedWindow} " +
                             $"heatedNb={heatedNeighbour} shaft={facesShaft} " +
@@ -1362,7 +1364,7 @@ namespace QOVETER.Services
                             extWindowAreaM2 += curtainAreaM2;
 
                             if (!adjacentCategory.HasValue)
-                                externalWallIds.Add(wall.Id.IntegerValue);
+                                externalWallIds.Add(wall.Id.IntValue());
 
                             Logger.Debug(
                                 $"    Витраж «{wallTypeName}»: L={curtainLenM:F2}м H={curtainHeightM:F2}м " +
@@ -1391,7 +1393,7 @@ namespace QOVETER.Services
                         // ограждающая, но угловым помещение от неё не становится:
                         // надбавка по СП про обдув и инсоляцию, а не про любую ΔT.
                         if (!adjacentCategory.HasValue)
-                            externalWallIds.Add(thermalWall.Id.IntegerValue);
+                            externalWallIds.Add(thermalWall.Id.IntValue());
 
                         // ── U-значение стены: единая реализация в WallThermalCalculator ─────
                         // Ограждение — это ВСЯ сборка: несущая стена плюс фасадные
@@ -1476,8 +1478,8 @@ namespace QOVETER.Services
                         // те окна, ради которых затевался. Тип стены-хоста ни о чём
                         // не говорит: ResolveThermalWall и так возвращает произвольный
                         // элемент из тех, чей габарит накрыл пробу.
-                        var segmentHostIds = new HashSet<int> { wallElemId.IntegerValue };
-                        segmentHostIds.Add(thermalWall.Id.IntegerValue);
+                        var segmentHostIds = new HashSet<int> { wallElemId.IntValue() };
+                        segmentHostIds.Add(thermalWall.Id.IntValue());
 
                         // ── Фильтрация окон/дверей по положению вдоль сегмента ──────────────────
                         // Проблема: одна длинная наружная стена может граничить с кухней И жилой
@@ -1514,14 +1516,14 @@ namespace QOVETER.Services
                             // отдельный сегмент границы, вычитать его неоткуда.
                             if (win.IsCurtainGlazing) continue;
 
-                            int winId = win.Id?.IntegerValue ?? -1;
+                            int winId = win.Id?.IntValue() ?? -1;
                             if (winId >= 0 && consumedOpenings.Contains(winId)) continue;
 
                             // Точное совпадение по хосту — быстрый путь; во всех остальных
                             // случаях принадлежность решает ГЕОМЕТРИЯ. Окно уже отнесено
                             // к этому помещению пробой с обеих сторон стены-хоста, так что
                             // кандидаты заведомо «свои»; остаётся выбрать, к какому сегменту.
-                            int hostId = win.HostWallId?.IntegerValue ?? -1;
+                            int hostId = win.HostWallId?.IntValue() ?? -1;
                             bool exactHost = hostId >= 0 && segmentHostIds.Contains(hostId);
 
                             XYZ winPt = null;
@@ -1585,10 +1587,10 @@ namespace QOVETER.Services
                         foreach (var door in roomData.Doors)
                         {
                             if (!door.IsExternal) continue;
-                            int doorId = door.Id?.IntegerValue ?? -1;
+                            int doorId = door.Id?.IntValue() ?? -1;
                             if (doorId >= 0 && consumedOpenings.Contains(doorId)) continue;
 
-                            int doorHostId = door.HostWallId?.IntegerValue ?? -1;
+                            int doorHostId = door.HostWallId?.IntValue() ?? -1;
                             bool exactDoorHost = doorHostId >= 0 && segmentHostIds.Contains(doorHostId);
 
                             XYZ doorPt = null;
@@ -1879,8 +1881,8 @@ namespace QOVETER.Services
             // просто как «окон 0,0 м²» — числом, на которое никто не смотрит.
             var unattached = roomData.Windows
                 .Where(w => !w.IsCurtainGlazing)   // витраж — сам сегмент, привязывать не к чему
-                .Where(w => (w.Id?.IntegerValue ?? -1) < 0 ||
-                            !consumedOpenings.Contains(w.Id.IntegerValue))
+                .Where(w => (w.Id?.IntValue() ?? -1) < 0 ||
+                            !consumedOpenings.Contains(w.Id.IntValue()))
                 .ToList();
             if (unattached.Count > 0)
             {
@@ -1902,7 +1904,7 @@ namespace QOVETER.Services
                 {
                     if (w.HostWallId == null) return "хост не задан";
                     var host = doc.GetElement(w.HostWallId);
-                    return $"{w.HostWallId.IntegerValue} «{(host as Wall)?.WallType?.Name ?? host?.Name ?? host?.GetType().Name ?? "?"}»";
+                    return $"{w.HostWallId.IntValue()} «{(host as Wall)?.WallType?.Name ?? host?.Name ?? host?.GetType().Name ?? "?"}»";
                 });
 
                 Logger.Debug(
@@ -2514,7 +2516,7 @@ namespace QOVETER.Services
                         // 2026-08-17 таких случаев 403 из 1 023 промахов — самая
                         // крупная группа, и её природа осталась неизвестной.
                         bool sameRoom = roomOfSegment != null &&
-                                        behind.Id.IntegerValue == roomOfSegment.Id.IntegerValue;
+                                        behind.Id.IntValue() == roomOfSegment.Id.IntValue();
                         trace.Add($"{d:F2}м: помещение «{behind.Name}» " +
                                   $"({(sameRoom ? "ТО ЖЕ" : "ЧУЖОЕ")}) — стоп");
                         break;
@@ -3165,8 +3167,8 @@ namespace QOVETER.Services
                     .WhereElementIsNotElementType()
                     .WherePasses(new BoundingBoxIntersectsFilter(outline))
                     .Where(e => e.Category != null &&
-                                e.Category.Id.IntegerValue != (int)BuiltInCategory.OST_Walls &&
-                                e.Category.Id.IntegerValue != (int)BuiltInCategory.OST_Rooms)
+                                e.Category.Id.IntValue() != (int)BuiltInCategory.OST_Walls &&
+                                e.Category.Id.IntValue() != (int)BuiltInCategory.OST_Rooms)
                     .Select(e => e.Category.Name)
                     .Distinct()
                     .Take(6)
@@ -3292,7 +3294,7 @@ namespace QOVETER.Services
         /// <summary>Колонна — несущая либо архитектурная.</summary>
         private static bool IsColumn(Element element)
         {
-            int? category = element?.Category?.Id?.IntegerValue;
+            int? category = element?.Category?.Id?.IntValue();
             return category == (int)BuiltInCategory.OST_StructuralColumns ||
                    category == (int)BuiltInCategory.OST_Columns;
         }

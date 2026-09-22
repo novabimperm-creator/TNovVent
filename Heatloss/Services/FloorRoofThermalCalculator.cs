@@ -5,6 +5,8 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using QOVETER.Models;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -179,7 +181,7 @@ namespace QOVETER.Services
                              .Cast<Floor>())
                 {
                     if (floor.LevelId == null) continue;
-                    int levelKey = floor.LevelId.IntegerValue;
+                    int levelKey = floor.LevelId.IntValue();
 
                     List<Boxed<Floor>> list;
                     if (!_floorsByLevel.TryGetValue(levelKey, out list))
@@ -228,7 +230,7 @@ namespace QOVETER.Services
             if (revitRoom.LevelId == null) return null;
 
             List<Boxed<Floor>> candidates;
-            if (!FloorsByLevel.TryGetValue(revitRoom.LevelId.IntegerValue, out candidates))
+            if (!FloorsByLevel.TryGetValue(revitRoom.LevelId.IntValue(), out candidates))
                 return null;
 
             foreach (var entry in candidates)

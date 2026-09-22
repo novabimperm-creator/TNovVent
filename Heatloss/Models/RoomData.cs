@@ -3,6 +3,8 @@ using Autodesk.Revit.DB.Architecture;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Models
 {
     public class RoomData
@@ -173,14 +175,14 @@ namespace QOVETER.Models
 
             return new RoomData
             {
-                Id             = room.Id.IntegerValue,
+                Id             = room.Id.IntValue(),
                 RoomElementId  = room.Id,
                 Name           = room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "Без названия",
                 Number         = room.Number ?? "0",
                 Area           = area,
                 Height         = height,
                 Volume         = area * height,
-                LevelId        = room.Level?.Id?.IntegerValue ?? -1,
+                LevelId        = room.Level?.Id?.IntValue() ?? -1,
                 LevelName      = room.Level?.Name ?? "Неизвестно",
                 FloorNumber    = floorNumber,
                 LevelElementId = room.Level?.Id,

@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     public class ElementCollectorService
@@ -209,7 +211,7 @@ namespace QOVETER.Services
             {
                 WindowsWithDefaultSize++;
                 Logger.Debug(
-                    $"[Окно] {window.Name} (id {window.Id.IntegerValue}): габариты не прочитаны " +
+                    $"[Окно] {window.Name} (id {window.Id.IntValue()}): габариты не прочитаны " +
                     $"(Ш={width:F2} В={height:F2}) — принято типовое окно " +
                     $"{DefaultWindowWidthM} × {DefaultWindowHeightM} м");
                 if (width  <= 0) width  = DefaultWindowWidthM;
@@ -268,11 +270,21 @@ namespace QOVETER.Services
                     return 1.0 / rSI;
             }
 
-            // Аналитический коэффициент Revit MEP
+            // Аналитический коэффициент Revit MEP.
+            // В Revit 2027 из API убрали ANALYTICAL_HEAT_TRANSFER_COEFFICIENT (U).
+            // Остался ANALYTICAL_THERMAL_RESISTANCE (R) — обратная величина, U = 1/R,
+            // читаем её тем же путём, что и российские параметры сопротивления выше.
+#if R2022
             var uParam = window.get_Parameter(BuiltInParameter.ANALYTICAL_HEAT_TRANSFER_COEFFICIENT);
             double uSI;
             if (RevitThermalParameter.TryReadUValue(uParam, owner, out uSI))
                 return uSI;
+#else
+            var rParam = window.get_Parameter(BuiltInParameter.ANALYTICAL_THERMAL_RESISTANCE);
+            double rAnalyticalSI;
+            if (RevitThermalParameter.TryReadResistance(rParam, owner, out rAnalyticalSI))
+                return 1.0 / rAnalyticalSI;
+#endif
 
             return 0; // Не найдено
         }
@@ -366,7 +378,7 @@ namespace QOVETER.Services
             }
             catch (Exception ex)
             {
-                Logger.Warn($"IsElementInRoom: ошибка для {element?.Id?.IntegerValue}", ex);
+                Logger.Warn($"IsElementInRoom: ошибка для {element?.Id?.IntValue()}", ex);
                 return false;
             }
         }

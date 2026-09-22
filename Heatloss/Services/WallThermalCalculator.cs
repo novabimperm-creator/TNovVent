@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.DB;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -512,7 +514,7 @@ namespace QOVETER.Services
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[Wall U] послойный расчёт не удался для {wall.Id.IntegerValue}", ex);
+                Logger.Warn($"[Wall U] послойный расчёт не удался для {wall.Id.IntValue()}", ex);
                 return false;
             }
         }

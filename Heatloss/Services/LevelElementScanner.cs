@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using static TNovCommon.ElementIdCompat;
+
 namespace QOVETER.Services
 {
     /// <summary>
@@ -47,7 +49,7 @@ namespace QOVETER.Services
         /// </summary>
         public LevelScanResult ScanLevel(ElementId levelId, List<RoomData> rooms)
         {
-            int key = levelId.IntegerValue;
+            int key = levelId.IntValue();
 
             // Кэш: не сканируем повторно
             if (_cache.ContainsKey(key))
@@ -114,10 +116,10 @@ namespace QOVETER.Services
 
                     var data = new ScannedElement
                     {
-                        ElementId   = win.Id.IntegerValue,
+                        ElementId   = win.Id.IntValue(),
                         Category    = "Окно",
                         TypeName    = win.Name,
-                        HostId      = win.Host?.Id?.IntegerValue ?? -1
+                        HostId      = win.Host?.Id?.IntValue() ?? -1
                     };
 
                     // Ширина
@@ -153,7 +155,7 @@ namespace QOVETER.Services
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error($"[Win] Ошибка обработки окна {win.Id.IntegerValue}", ex);
+                    Logger.Error($"[Win] Ошибка обработки окна {win.Id.IntValue()}", ex);
                 }
             }
         }
@@ -179,7 +181,7 @@ namespace QOVETER.Services
 
                     var data = new ScannedElement
                     {
-                        ElementId = wall.Id.IntegerValue,
+                        ElementId = wall.Id.IntValue(),
                         Category  = "Стена",
                         TypeName  = wall.Name
                     };
@@ -220,7 +222,7 @@ namespace QOVETER.Services
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error($"[Wall] Ошибка обработки стены {wall.Id.IntegerValue}", ex);
+                    Logger.Error($"[Wall] Ошибка обработки стены {wall.Id.IntValue()}", ex);
                 }
             }
         }
@@ -243,10 +245,10 @@ namespace QOVETER.Services
 
                     var data = new ScannedElement
                     {
-                        ElementId = door.Id.IntegerValue,
+                        ElementId = door.Id.IntValue(),
                         Category  = "Дверь",
                         TypeName  = door.Name,
-                        HostId    = door.Host?.Id?.IntegerValue ?? -1
+                        HostId    = door.Host?.Id?.IntValue() ?? -1
                     };
 
                     var wp = door.get_Parameter(BuiltInParameter.FAMILY_WIDTH_PARAM);
@@ -271,7 +273,7 @@ namespace QOVETER.Services
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error($"[Door] Ошибка обработки двери {door.Id.IntegerValue}", ex);
+                    Logger.Error($"[Door] Ошибка обработки двери {door.Id.IntValue()}", ex);
                 }
             }
         }
@@ -323,7 +325,7 @@ namespace QOVETER.Services
                 foreach (var win in room.Windows)
                 {
                     if (win.Id == null) continue;
-                    var scanned = scan.Windows.FirstOrDefault(s => s.ElementId == win.Id.IntegerValue);
+                    var scanned = scan.Windows.FirstOrDefault(s => s.ElementId == win.Id.IntValue());
                     if (scanned == null) continue;
 
                     if (scanned.Area > 0 && Math.Abs(win.Area - scanned.Area) > 0.05)
