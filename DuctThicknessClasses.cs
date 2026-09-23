@@ -85,7 +85,7 @@ namespace TNovVent
                 viewModel = JsonConvert.DeserializeObject<DTCViewModel>(File.ReadAllText(jsonpath));
                 Logger.Log("Десериализация прошла успешно", 1);
             }
-            else viewModel.filePath = @"//fs-nova/NOVA/04_БИБЛИОТЕКА/BIM/ВК_ОВ_Семейства/_TNov/Воздуховоды_Толщина стенки.xlsx"; //по умолчанию
+            else viewModel.filePath = TNovPaths.MepTables + @"\Воздуховоды_Толщина стенки.xlsx"; //по умолчанию
             var wpfview = new DTCWPF(viewModel);
             viewModel.CloseRequest += (s, e) => wpfview.Close();
             bool? ok = wpfview.ShowDialog();
