@@ -445,8 +445,16 @@ namespace QOVETER.Services
             // Состав берётся по ТОМУ ЖЕ ключу, что и группировка. Иначе при поэтажной
             // нумерации норма считалась бы по всем этажам сразу, а раздавалась
             // помещениям одного — ровно тот дефект, что кратно завышал расход.
+            //
+            // Неотапливаемые помещения квартиры (лоджия, балкон) в норму НЕ входят:
+            // вытяжка из лоджии не проектируется, а GetAirFlowRate для неё отдал бы
+            // кратность объёма. На нижнекамской модели (прогон 2026-10-07) лоджия
+            // и балкон кв. 111 несли её номер и добавляли 24,8 м³/ч к вытяжке 160 —
+            // +15% Q вент на каждой квартире с лоджией.
             var full = all
                 .Where(r => !string.IsNullOrWhiteSpace(r.Apartment) &&
+                            r.Category != RoomCategory.Shaft &&
+                            !ThermalConstants.UnheatedOrCommonCategories.Contains(r.Category) &&
                             string.Equals(ApartmentKey(r, perLevel), apartmentKey, StringComparison.Ordinal))
                 .ToList();
 
@@ -482,8 +490,15 @@ namespace QOVETER.Services
                 .Where(r => ThermalConstants.SupplyRatedCategories.Contains(r.Category))
                 .Sum(r => r.Area * ThermalConstants.LivingRoomAirFlow);
 
+            // Вытяжка квартиры — ТОЛЬКО помещения с нормой вытяжки: кухня,
+            // санузлы, постирочная (ТЗ: «Σ вытяжка по кухне и санузлам»).
+            // Раньше сюда попадало всё, что не приток, и внутриквартирные
+            // коридоры с кладовыми добавляли кратность объёма: на нижнекамской
+            // модели коридоры кв. 111 (12,2 м²) давали +17 м³/ч к вытяжке 160.
+            // Эти помещения обслуживаются перетеканием и нормы не формируют.
             double exhaust = normRooms
-                .Where(r => !ThermalConstants.SupplyRatedCategories.Contains(r.Category))
+                .Where(r => r.Category == RoomCategory.Kitchen ||
+                            ThermalConstants.ExhaustRateByCategory.ContainsKey(r.Category))
                 .Sum(r => GetAirFlowRate(r, parameters));
 
             double airFlow = Math.Max(supply, exhaust);
