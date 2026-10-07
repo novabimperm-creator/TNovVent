@@ -201,7 +201,11 @@ namespace QOVETER.Services
                 case WallThermalSource.LayeredCompoundStructure: return "расчёт по слоям";
                 case WallThermalSource.AnalyticalParameter:      return "аналитическое R";
                 case WallThermalSource.CustomParameter:          return "параметр модели";
-                case WallThermalSource.Assembly:                 return "сборку";
+                // Именительный падеж: строка идёт в подпись «Источник U» окна деталей
+                // и в сводку площадей. Единственное место со склонением («осталась
+                // на …») для Assembly недостижимо: Calculate() сборку не возвращает,
+                // её делает только CalculateAssembly.
+                case WallThermalSource.Assembly:                 return "сборка: несущая + фасад";
                 case WallThermalSource.NormativeByMaterial:      return "λ по СП 50 прил. Т (в модели λ нет)";
                 default:                                         return "типовое значение (данных нет)";
             }

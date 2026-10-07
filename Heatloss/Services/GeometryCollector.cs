@@ -1675,7 +1675,12 @@ namespace QOVETER.Services
                             IsExternal  = true,
                             ThermalFromModel = wallThermal.IsEntirelyFromModel,
                             ThermalNormative = wallThermal.UsedNormativeLambda,
-                            ThermalSource    = WallThermalCalculator.DescribeSource(wallThermal.Source),
+                            // Поднятие до нормируемого R — не источник данных, а признак
+                            // пробела в модели; в подписи оно главнее источника: инженер,
+                            // увидев «0,335 из слоёв», стал бы искать слои, которых нет.
+                            ThermalSource    = wallThermal.RaisedToNormative
+                                ? "поднято до нормируемого R (СП 50 табл. 3)"
+                                : WallThermalCalculator.DescribeSource(wallThermal.Source),
                             AdjacentCategory = adjacentCategory,
                             AdjacentRoomId   = adjacentRoomId,
                             // Сторона света — по вектору «наружу», посчитанному пробой,

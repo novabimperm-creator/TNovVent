@@ -1750,7 +1750,9 @@ namespace QOVETER.UI
                 var detailsWindow = new RoomDetailsWindow();
                 detailsWindow.Owner = this;
                 detailsWindow.WindowStartupLocation = WindowStartupLocation.CenterOwner;
-                detailsWindow.SetData(room, result);
+                // Температуры лоджий из баланса — без них «за стеной: Лоджия»
+                // не говорит, при какой ΔT посчитано ограждение.
+                detailsWindow.SetData(room, result, _lastUnheatedTemperatures);
                 detailsWindow.ShowDialog();
             }
             catch (Exception ex)

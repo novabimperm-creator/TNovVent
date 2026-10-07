@@ -153,6 +153,14 @@ namespace QOVETER.Services
             /// <summary>Назначается на шаге распределения воздухообмена.</summary>
             public double QVent;
 
+            /// <summary>
+            /// Принятый расход воздуха, м³/ч — слагаемое L, из которого получен
+            /// <see cref="QVent"/>. Хранится рядом с результатом, потому что
+            /// восстановить его из ватт может только тот, кто помнит формулу
+            /// и ΔT, а проверяет число инженер.
+            /// </summary>
+            public double VentAirFlowM3h;
+
             /// <summary>Бытовые тепловыделения, вычитаемые из этой строки (доля по квартире).</summary>
             public double QVnSubtracted;
 
@@ -268,8 +276,10 @@ namespace QOVETER.Services
 
             foreach (var computation in perRoom)
             {
+                double airFlow = GetAirFlowRate(computation.Room, parameters);
+                computation.VentAirFlowM3h = airFlow;
                 computation.QVent = ThermalConstants.AirFlowToWatts
-                                  * GetAirFlowRate(computation.Room, parameters)
+                                  * airFlow
                                   * ThermalConstants.AirDensity
                                   * ThermalConstants.AirSpecificHeat
                                   * computation.DeltaT;
@@ -302,6 +312,7 @@ namespace QOVETER.Services
                 double airFlow = n * volume;
                 totalFlow += airFlow;
 
+                computation.VentAirFlowM3h = airFlow;
                 computation.QVent = ThermalConstants.AirFlowToWatts
                                   * airFlow
                                   * ThermalConstants.AirDensity
@@ -524,6 +535,7 @@ namespace QOVETER.Services
             foreach (var computation in receivers)
             {
                 double share = computation.Room.Area / totalArea;
+                computation.VentAirFlowM3h = airFlow * share;
                 computation.QVent = ThermalConstants.AirFlowToWatts
                                   * (airFlow * share)
                                   * ThermalConstants.AirDensity
@@ -562,6 +574,8 @@ namespace QOVETER.Services
                 Apartment = room.Apartment ?? string.Empty,
                 Q_ogr    = Math.Round(computation.QOgr,  1),
                 Q_vent   = Math.Round(computation.QVent, 1),
+                VentAirFlow = Math.Round(computation.VentAirFlowM3h, 1),
+                DeltaT      = Math.Round(computation.DeltaT, 1),
                 // Инфильтрация. Решение принято 2026-08-04 по ТЗ: формула (1) даёт единый
                 // член Qинф/вент по расходу L = max(приток, вытяжка). Отдельного слагаемого
                 // в ТЗ нет — в отчётах колонки «Q инф» больше нет, а CalculateInfiltrationLoss

@@ -139,19 +139,24 @@
                                            FontSize="14" FontWeight="Bold" 
                                            Foreground="#2C3E50" Margin="0,0,0,10"/>
                                 
-                                <!-- Показываем то, что реально заполнено и входит в расчёт:
-                                     нетто-площадь, U и ориентацию. Поле Material у стены
-                                     помещения не заполняется никогда — его писал только
-                                     мёртвый ElementCollectorService.CreateWallInfo,
-                                     удалённый 2026-08-06, — и колонка «Материал» здесь
-                                     всегда была пустой. -->
+                                <!-- Источник строк — EnclosureRow (code-behind): все
+                                     подписи собираются там, включая R, «за стеной»
+                                     (с температурой лоджии из баланса) и источник U.
+                                     Это ответ на вопросы проектировщика 2026-10-07:
+                                     «почему у одинаковых стен разные U», «почему окна
+                                     теряют мало», «добавить R по конструкциям». -->
                                 <ItemsControl x:Name="WallsList">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
                                             <Border BorderBrush="#BDC3C7" BorderThickness="0,0,0,1" Padding="0,5">
                                                 <StackPanel>
                                                     <TextBlock Text="{Binding TypeName}" FontWeight="SemiBold"/>
-                                                    <Grid Margin="10,0,0,0">
+                                                    <Grid Margin="10,2,0,0">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
@@ -161,14 +166,23 @@
                                                             <ColumnDefinition Width="*"/>
                                                         </Grid.ColumnDefinitions>
 
-                                                        <TextBlock Text="Площадь:" Grid.Column="0" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding Area, StringFormat={}{0:F2} м²}" Grid.Column="1" Margin="5,0,10,0"/>
+                                                        <TextBlock Text="Площадь:" Grid.Row="0" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding AreaText}" Grid.Row="0" Grid.Column="1" Margin="5,0,10,0"/>
 
-                                                        <TextBlock Text="U:" Grid.Column="2" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding UValue, StringFormat={}{0:F3} Вт/(м²·К)}" Grid.Column="3" Margin="5,0,10,0"/>
+                                                        <TextBlock Text="U:" Grid.Row="0" Grid.Column="2" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding UText}" Grid.Row="0" Grid.Column="3" Margin="5,0,10,0"/>
 
-                                                        <TextBlock Text="Ориентация:" Grid.Column="4" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding Orientation}" Grid.Column="5" Margin="5,0,0,0"/>
+                                                        <TextBlock Text="R:" Grid.Row="0" Grid.Column="4" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding RText}" Grid.Row="0" Grid.Column="5" Margin="5,0,0,0"/>
+
+                                                        <TextBlock Text="За стеной:" Grid.Row="1" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding BehindText}" Grid.Row="1" Grid.Column="1" Margin="5,0,10,0" FontWeight="SemiBold"/>
+
+                                                        <TextBlock Text="Ориентация:" Grid.Row="1" Grid.Column="2" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding OrientationText}" Grid.Row="1" Grid.Column="3" Margin="5,0,10,0"/>
+
+                                                        <TextBlock Text="U из:" Grid.Row="2" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding SourceText}" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="5" Margin="5,0,0,0" Foreground="#7F8C8D" TextWrapping="Wrap"/>
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
@@ -191,19 +205,34 @@
                                             <Border BorderBrush="#BDC3C7" BorderThickness="0,0,0,1" Padding="0,5">
                                                 <StackPanel>
                                                     <TextBlock Text="{Binding TypeName}" FontWeight="SemiBold"/>
-                                                    <Grid Margin="10,0,0,0">
+                                                    <Grid Margin="10,2,0,0">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
                                                         </Grid.ColumnDefinitions>
-                                                        
-                                                        <TextBlock Text="Площадь:" Grid.Column="0" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding Area, StringFormat={}{0:F2} м²}" Grid.Column="1" Margin="5,0,10,0"/>
-                                                        
-                                                        <TextBlock Text="Тип:" Grid.Column="2" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding GlassType}" Grid.Column="3" Margin="5,0,0,0"/>
+
+                                                        <TextBlock Text="Площадь:" Grid.Row="0" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding AreaText}" Grid.Row="0" Grid.Column="1" Margin="5,0,10,0"/>
+
+                                                        <TextBlock Text="U:" Grid.Row="0" Grid.Column="2" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding UText}" Grid.Row="0" Grid.Column="3" Margin="5,0,10,0"/>
+
+                                                        <TextBlock Text="Тип:" Grid.Row="0" Grid.Column="4" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding ExtraText}" Grid.Row="0" Grid.Column="5" Margin="5,0,0,0"/>
+
+                                                        <TextBlock Text="За окном:" Grid.Row="1" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding BehindText}" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Margin="5,0,10,0" FontWeight="SemiBold"/>
+
+                                                        <TextBlock Text="Ориентация:" Grid.Row="1" Grid.Column="4" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding OrientationText}" Grid.Row="1" Grid.Column="5" Margin="5,0,0,0"/>
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
@@ -226,19 +255,31 @@
                                             <Border BorderBrush="#BDC3C7" BorderThickness="0,0,0,1" Padding="0,5">
                                                 <StackPanel>
                                                     <TextBlock Text="{Binding TypeName}" FontWeight="SemiBold"/>
-                                                    <Grid Margin="10,0,0,0">
+                                                    <Grid Margin="10,2,0,0">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto"/>
+                                                            <RowDefinition Height="Auto"/>
+                                                        </Grid.RowDefinitions>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                             <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
                                                         </Grid.ColumnDefinitions>
-                                                        
-                                                        <TextBlock Text="Площадь:" Grid.Column="0" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding Area, StringFormat={}{0:F2} м²}" Grid.Column="1" Margin="5,0,10,0"/>
-                                                        
-                                                        <TextBlock Text="Материал:" Grid.Column="2" Foreground="#7F8C8D"/>
-                                                        <TextBlock Text="{Binding Material}" Grid.Column="3" Margin="5,0,0,0"/>
+
+                                                        <TextBlock Text="Площадь:" Grid.Row="0" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding AreaText}" Grid.Row="0" Grid.Column="1" Margin="5,0,10,0"/>
+
+                                                        <TextBlock Text="U:" Grid.Row="0" Grid.Column="2" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding UText}" Grid.Row="0" Grid.Column="3" Margin="5,0,10,0"/>
+
+                                                        <TextBlock Text="Материал:" Grid.Row="0" Grid.Column="4" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding ExtraText}" Grid.Row="0" Grid.Column="5" Margin="5,0,0,0"/>
+
+                                                        <TextBlock Text="За дверью:" Grid.Row="1" Grid.Column="0" Foreground="#7F8C8D"/>
+                                                        <TextBlock Text="{Binding BehindText}" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="5" Margin="5,0,0,0" FontWeight="SemiBold"/>
                                                     </Grid>
                                                 </StackPanel>
                                             </Border>
@@ -296,23 +337,36 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
-                                    
+
                                     <!-- Это 1/U_avg = ΣA / Σ(U·A), а не среднее R: для
                                          неоднородной стены величины различаются, и подпись
-                                         «Среднее R стен» вводила в заблуждение. -->
+                                         «Среднее R стен» вводила в заблуждение. Формулы
+                                         выписаны прямо в окно: вопрос «как посчитал?»
+                                         от проектировщика 2026-10-07 — ровно про эти
+                                         две строки, и отвечать на него должен UI,
+                                         а не переписка. -->
                                     <TextBlock Text="1/U средневзвеш.:" Grid.Row="0" Grid.Column="0" Style="{StaticResource DetailLabelStyle}"/>
                                     <TextBlock x:Name="AverageRText" Grid.Row="0" Grid.Column="1" Style="{StaticResource DetailValueStyle}"/>
-                                    
-                                    <TextBlock Text="Коэфф. теплопотерь:" Grid.Row="1" Grid.Column="0" Style="{StaticResource DetailLabelStyle}"/>
-                                    <TextBlock x:Name="HeatLossCoefficientText" Grid.Row="1" Grid.Column="1" Style="{StaticResource DetailValueStyle}"/>
-                                    
-                                    <TextBlock Text="Удельная нагрузка:" Grid.Row="2" Grid.Column="0" Style="{StaticResource DetailLabelStyle}"/>
-                                    <TextBlock x:Name="SpecificLoadText" Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailValueStyle}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Foreground="#95A5A6" FontSize="11" Margin="0,-3,0,6" TextWrapping="Wrap"
+                                               Text="= ΣA / Σ(U·A) по наружным стенам помещения (площади нетто, без окон и дверей). Это НЕ среднее R: доли стен взвешены по тепловому потоку."/>
+
+                                    <TextBlock Text="Коэфф. теплопотерь:" Grid.Row="2" Grid.Column="0" Style="{StaticResource DetailLabelStyle}"/>
+                                    <TextBlock x:Name="HeatLossCoefficientText" Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailValueStyle}"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Foreground="#95A5A6" FontSize="11" Margin="0,-3,0,6" TextWrapping="Wrap"
+                                               Text="= Σ(U·A) / ΣA — средневзвешенное U стен, обратная величина строки выше."/>
+
+                                    <TextBlock Text="Удельная нагрузка:" Grid.Row="4" Grid.Column="0" Style="{StaticResource DetailLabelStyle}"/>
+                                    <TextBlock x:Name="SpecificLoadText" Grid.Row="4" Grid.Column="1" Style="{StaticResource DetailValueStyle}"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Foreground="#95A5A6" FontSize="11" Margin="0,-3,0,0" TextWrapping="Wrap"
+                                               Text="= Q с запасом / площадь помещения."/>
                                 </Grid>
                             </StackPanel>
                         </Border>
