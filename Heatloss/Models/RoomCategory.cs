@@ -98,11 +98,23 @@
             // Ванная и СОВМЕЩЁННЫЙ санузел — 50 м³/ч; раздельный санузел и туалет — 25 м³/ч
             // (ТЗ, раздел «Qвент»). Порядок важен: «совмещённый санузел» должен попасть
             // в Bathroom раньше, чем сработает общая проверка на «санузел».
+            //
+            // Сокращения — отдельная статья. В московской модели (прогон 2026-10-07)
+            // санузлы названы «Совм.с.у.»: ни «совмещ», ни «с/у» в этой строке нет —
+            // точки вместо дроби и обрубленное «совм». Все санузлы дома ушли
+            // в «Не определено», их вытяжка (50 м³/ч каждый) ВЫПАЛА из нормы
+            // квартиры, и L взялся по притоку: проверено обратным счётом по кв. 111 —
+            // Σ расходов 123,9 м³/ч = приток (жилые 102,4 + Other·3), а вытяжка
+            // должна была дать 160. Q вент занижался на ~23%, tв санузла — 20 вместо 25.
+            bool sanuzel = both.Contains("санузел") || both.Contains("сануз") ||
+                           both.Contains("с/у") || both.Contains("с.у");
             if (both.Contains("ванн") || both.Contains("душев") ||
-                (both.Contains("совмещ") && (both.Contains("санузел") || both.Contains("с/у"))))
+                ((both.Contains("совмещ") || both.Contains("совм")) && sanuzel))
                 return RoomCategory.Bathroom;
-            if (both.Contains("санузел") || both.Contains("туалет") ||
-                both.Contains("с/у")) return RoomCategory.Toilet;
+            // «Уборная» — туалет; «уборочная» (инвентаря) — нет, поэтому «уборн»,
+            // а не «убор»: до «н» обе, дальше расходятся («уборНая»/«уборОчная»).
+            if (sanuzel || both.Contains("туалет") ||
+                both.Contains("уборн")) return RoomCategory.Toilet;
             if (both.Contains("спальн")) return RoomCategory.Bedroom;
             if (both.Contains("гостин") || IsResidentialHall(both)) return RoomCategory.LivingRoom;
             if (both.Contains("столов")) return RoomCategory.DiningRoom;
