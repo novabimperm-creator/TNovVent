@@ -935,8 +935,18 @@ namespace QOVETER.Services
             foreach (var door in room.Doors.Where(d => d.IsExternal))
             {
                 double doorDeltaT = SurfaceDeltaT(door, tInt, deltaT, room, parameters);
-                // Для двери берём ОБЩУЮ высоту здания (β = k·H_здания, не H_этажа)
-                double doorBeta = door.CalculateDoorBetaCoefficient(buildingParams.TotalHeight, buildingParams.DoorBetaCoefficients);
+                // Для двери берём ОБЩУЮ высоту здания (β = k·H_здания, не H_этажа).
+                //
+                // Надбавка на врывание — только у двери В НАРУЖНЫЙ ВОЗДУХ:
+                // ТЗ даёт её для входных дверей здания, через которые врывается
+                // уличный воздух. Балконная дверь на остеклённую лоджию и дверь
+                // квартиры в лестничную клетку — ограждения с малой ΔT, врывания
+                // улицы за ними нет. Пока двери шли с нулевой площадью, это
+                // молчало; с настоящими габаритами β = 0,22·H утраивала бы
+                // потери каждой балконной двери.
+                double doorBeta = door.AdjacentCategory.HasValue
+                    ? 0
+                    : door.CalculateDoorBetaCoefficient(buildingParams.TotalHeight, buildingParams.DoorBetaCoefficients);
                 details.DoorLoss += door.CalculateHeatLoss(doorDeltaT) * (1 + betaSum + doorBeta);
 
                 if (doorBeta > 0)
