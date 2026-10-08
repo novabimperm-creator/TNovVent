@@ -59,7 +59,8 @@ namespace QOVETER.Services
             double homogeneityFactor,
             double floorHeight,
             WallConstructionProfile profile = null,
-            BridgeSelectors selectors = null)
+            BridgeSelectors selectors = null,
+            ProjectStage stage = ProjectStage.RD)
         {
             var result = new ReducedResistanceResult
             {
@@ -148,7 +149,7 @@ namespace QOVETER.Services
 
                 var fromSp = profile != null
                     ? SP230Catalog.Find(node.Type, profile.Construction, profile,
-                                        node.Variant, nodeSelectors)
+                                        node.Variant, nodeSelectors, stage)
                     : null;
 
                 if (fromSp != null)

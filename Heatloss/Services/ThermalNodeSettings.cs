@@ -91,10 +91,14 @@ namespace QOVETER.Services
         /// <param name="modelPath">Полный путь к .rvt; пусто — модель не сохранена.</param>
         /// <param name="defaults">Умолчания расчёта, поверх которых накладывается файл.</param>
         /// <param name="source">Откуда взято: путь к файлу либо «умолчания».</param>
-        public static BridgeSelectors Load(string modelPath, BridgeSelectors defaults, out string source)
+        /// <param name="stage">Стадия — определяет формулировку умолчания в source.</param>
+        public static BridgeSelectors Load(string modelPath, BridgeSelectors defaults, out string source,
+                                           ProjectStage stage = ProjectStage.RD)
         {
             var result = Clone(defaults ?? new BridgeSelectors());
-            source = "умолчания расчёта (исполнение узлов не задано — берётся худшее по потерям)";
+            source = stage == ProjectStage.P
+                ? "умолчания расчёта (исполнение узлов не задано — принято типовое, стадия П)"
+                : "умолчания расчёта (исполнение узлов не задано — берётся худшее по потерям)";
 
             string path = ExistingPath(modelPath);
             if (path == null) return result;
@@ -270,7 +274,8 @@ namespace QOVETER.Services
                     "Исполнение узлов фасада ДЛЯ ЭТОГО ОБЪЕКТА. Из модели Revit эти признаки " +
                     "не вытаскиваются — это чертёж узла, а не геометрия здания. " +
                     "Пока поле пустое (null), из равных по числовым признакам таблиц СП 230 " +
-                    "берётся ХУДШАЯ по потерям — оценка в запас. Заполняйте по своему проекту.",
+                    "на стадии П берётся ТИПОВАЯ (середина по потерям), на стадии РД — " +
+                    "ХУДШАЯ (оценка в запас). Заполняйте по листу узлов своего проекта.",
                 Model = string.IsNullOrWhiteSpace(modelPath) ? "" : Path.GetFileName(modelPath),
                 Execution = null,
                 ExecutionHelp =

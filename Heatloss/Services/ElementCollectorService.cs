@@ -32,6 +32,12 @@ namespace QOVETER.Services
         /// </summary>
         public int WindowsWithDefaultSize { get; private set; }
 
+        /// <summary>
+        /// Сколько «окон» оказались проёмами под витраж и пропущены: остекление
+        /// там считает сегмент витражной стены, а проём поверх него — двойной счёт.
+        /// </summary>
+        public int WindowsCoveredByCurtain { get; private set; }
+
         public ElementCollectorService(Document document)
         {
             _document = document;
@@ -133,10 +139,41 @@ namespace QOVETER.Services
 
                 int candidates = windowCollector.Count;
                 int matched = 0;
+                var boundaryCurtainIds = BoundaryCurtainWallIds(room);
                 foreach (var window in windowCollector)
                 {
+                    // Вложенные общие семейства окна лежат в той же категории:
+                    // в московской модели на ~490 настоящих окон приходится
+                    // 4 278 вложенных — откосы, створки, наличники, подоконники,
+                    // отливы. Попав в room.Windows, такой элемент считается
+                    // остеклением с U стеклопакета (на скрине проектировщика
+                    // 2026-10-07 виден «Наличник Подрезка 45 градусов, 0,07 м²»),
+                    // а створка с реальными габаритами удвоила бы площадь окна.
+                    if (window.SuperComponent != null) continue;
+
                     if (IsElementInRoom(window, room))
                     {
+                        // Проём под витраж — не окно, ЕСЛИ этот витраж сам образует
+                        // сегмент границы помещения: тогда остекление уже посчитано
+                        // сегментом целиком (IsCurtainGlazing), и проём поверх него —
+                        // двойной счёт. У помещения 1-11 так выходило 45 м² «окон»
+                        // при физических 23 («Окна вычтено» ≠ «Окна всего»).
+                        //
+                        // ⚠ Требование «витраж есть в границе ЭТОГО помещения»
+                        // обязательно: у лоджий той же модели холодный витраж стоит
+                        // В ПРОЁМЕ кирпичной стены и границу не образует — там
+                        // окно-проём единственный носитель остекления, и пропустить
+                        // его значило бы объявить лоджию закрытой кирпичом.
+                        if (IsCoveredByCurtainWall(window, boundaryCurtainIds))
+                        {
+                            WindowsCoveredByCurtain++;
+                            Logger.Debug(
+                                $"[Окно] {window.Name} (id {window.Id.IntegerValue}): " +
+                                "перед проёмом витраж из границы помещения — остекление " +
+                                "считает его сегмент, окно пропущено");
+                            continue;
+                        }
+
                         var windowInfo = CreateWindowInfo(window);
                         windows.Add(windowInfo);
                         matched++;
@@ -171,6 +208,13 @@ namespace QOVETER.Services
                 
                 foreach (FamilyInstance door in doorCollector)
                 {
+                    // Вложенные общие семейства тоже лежат в категории «Двери»:
+                    // в московской модели это 736 «Ручка Нажимная» и 357 «Полотно
+                    // Глухое» на 473 настоящих двери. Дверь — только верхний
+                    // уровень; ручка, попав сюда, получила бы габариты-заглушки
+                    // 0,9 × 2,1 и удвоила бы дверные потери.
+                    if (door.SuperComponent != null) continue;
+
                     if (IsElementInRoom(door, room))
                     {
                         var doorInfo = CreateDoorInfo(door);
@@ -184,6 +228,86 @@ namespace QOVETER.Services
             }
             
             return doors;
+        }
+
+        /// <summary>
+        /// Id витражных стен, образующих сегменты границы помещения. Только они
+        /// имеют право «накрыть» окно-проём: их площадь уже входит в остекление
+        /// помещения сегментом (IsCurtainGlazing в GeometryCollector).
+        /// </summary>
+        private List<ElementId> BoundaryCurtainWallIds(Room room)
+        {
+            var ids = new List<ElementId>();
+            try
+            {
+                var loops = room.GetBoundarySegments(new SpatialElementBoundaryOptions());
+                if (loops == null) return ids;
+                foreach (var loop in loops)
+                    foreach (var seg in loop)
+                    {
+                        var wall = _document.GetElement(seg.ElementId) as Wall;
+                        if (wall?.WallType?.Kind == WallKind.Curtain && !ids.Contains(wall.Id))
+                            ids.Add(wall.Id);
+                    }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"BoundaryCurtainWallIds: {ex.Message}");
+            }
+            return ids;
+        }
+
+        /// <summary>
+        /// Перед окном (в пределах толщины стены с зазором) стоит витражная стена
+        /// ИЗ ГРАНИЦЫ этого помещения, параллельная хост-стене окна. Такое «окно» —
+        /// проём под витраж: остекление уже посчитано сегментом витража.
+        ///
+        /// <para>Проверка параллельности обязательна: у углового окна в выборку
+        /// по габариту попадает и перпендикулярный витраж соседнего фасада —
+        /// без неё настоящее окно рядом с витражом молча бы выпало.</para>
+        ///
+        /// <para>Допуск 0,8 м — толщина несущей стены плюс зазор до витража.</para>
+        /// </summary>
+        private bool IsCoveredByCurtainWall(FamilyInstance window, List<ElementId> boundaryCurtainIds)
+        {
+            if (boundaryCurtainIds == null || boundaryCurtainIds.Count == 0) return false;
+            try
+            {
+                var lp = (window.Location as LocationPoint)?.Point;
+                if (lp == null) return false;
+
+                var hostCurve = ((window.Host as Wall)?.Location as LocationCurve)?.Curve;
+                XYZ hostDir = null;
+                if (hostCurve != null)
+                    hostDir = (hostCurve.GetEndPoint(1) - hostCurve.GetEndPoint(0)).Normalize();
+
+                double maxDistFt = UnitUtils.ConvertToInternalUnits(0.8, UnitTypeId.Meters);
+                foreach (var id in boundaryCurtainIds)
+                {
+                    var curtain = _document.GetElement(id) as Wall;
+                    var curve = (curtain?.Location as LocationCurve)?.Curve;
+                    if (curve == null) continue;
+
+                    if (hostDir != null)
+                    {
+                        XYZ dir = (curve.GetEndPoint(1) - curve.GetEndPoint(0)).Normalize();
+                        if (Math.Abs(dir.DotProduct(hostDir)) < 0.7) continue; // не параллелен
+                    }
+
+                    // Расстояние — В ПЛАНЕ: точка вставки окна стоит выше кривой
+                    // стены (подоконник), и 3D-расстояние добавляло бы к зазору
+                    // высоту подоконника — окно от пола проходило бы порог,
+                    // окно с подоконником 0,9 м уже нет.
+                    XYZ flat = new XYZ(lp.X, lp.Y, curve.GetEndPoint(0).Z);
+                    var proj = curve.Project(flat);
+                    if (proj != null && proj.Distance <= maxDistFt) return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"IsCoveredByCurtainWall: {ex.Message}");
+            }
+            return false;
         }
 
         private WindowInfo CreateWindowInfo(FamilyInstance window)
@@ -298,16 +422,25 @@ namespace QOVETER.Services
                 Location = door.Location
             };
 
-            // Размеры: параметры хранятся в футах → конвертируем в метры
-            var widthParam  = door.get_Parameter(BuiltInParameter.DOOR_WIDTH);
-            var heightParam = door.get_Parameter(BuiltInParameter.DOOR_HEIGHT);
+            // Габариты — той же цепочкой, что у окон: экземпляр → тип → русские
+            // имена. DOOR_WIDTH/DOOR_HEIGHT — параметры ТИПА (у pmN-семейств
+            // московской модели на экземпляре их нет вовсе), а прежний код читал
+            // экземпляр и на null молча брал AsDouble() = 0: все двери дома
+            // выходили «0,00 м²», не теряли ни ватта и не вычитались из стен.
+            // Та же ловушка, что FUNCTION_PARAM и WALL_ATTR_WIDTH_PARAM.
+            doorInfo.Width  = ReadDimensionM(door, BuiltInParameter.DOOR_WIDTH,
+                                             BuiltInParameter.FAMILY_WIDTH_PARAM,  WidthParameterNames);
+            doorInfo.Height = ReadDimensionM(door, BuiltInParameter.DOOR_HEIGHT,
+                                             BuiltInParameter.FAMILY_HEIGHT_PARAM, HeightParameterNames);
 
-            doorInfo.Width  = widthParam  != null
-                ? UnitUtils.ConvertFromInternalUnits(widthParam.AsDouble(),  UnitTypeId.Meters)
-                : 0.9;
-            doorInfo.Height = heightParam != null
-                ? UnitUtils.ConvertFromInternalUnits(heightParam.AsDouble(), UnitTypeId.Meters)
-                : 2.1;
+            if (doorInfo.Width <= 0 || doorInfo.Height <= 0)
+            {
+                Logger.Debug(
+                    $"[Дверь] {door.Name} (id {door.Id.IntegerValue}): габариты не прочитаны " +
+                    $"(Ш={doorInfo.Width:F2} В={doorInfo.Height:F2}) — принята дверь 0,9 × 2,1 м");
+                if (doorInfo.Width  <= 0) doorInfo.Width  = 0.9;
+                if (doorInfo.Height <= 0) doorInfo.Height = 2.1;
+            }
 
             // Площадь в м²
             doorInfo.Area = doorInfo.Width * doorInfo.Height;
@@ -524,11 +657,54 @@ namespace QOVETER.Services
 
         private bool IsExternalDoor(FamilyInstance door)
         {
+            // Сначала — что ПО ОБЕ СТОРОНЫ двери, и только потом функция стены.
+            // Функции типов в моделях не следят: в московской модели (2026-10-07)
+            // «Перегородка Кирп120 рядовой» помечена Exterior, и дверь санузла
+            // в коридор считалась наружной — 251 помещение получало β врывания
+            // 0,22·H здания у обычной межкомнатной двери. Если дверь ведёт
+            // из отапливаемого помещения в отапливаемое, она внутренняя,
+            // что бы ни говорил тип хост-стены.
+            try
+            {
+                var from = door.FromRoom;
+                var to   = door.ToRoom;
+                if (from != null && to != null)
+                {
+                    bool fromHeated = IsHeatedSide(from);
+                    bool toHeated   = IsHeatedSide(to);
+                    if (fromHeated && toHeated) return false;
+                    // Одна из сторон — лоджия, лестница, шахта, подвал:
+                    // дверь ограждающая, ΔT до соседа поставит движок
+                    // через AdjacentCategory при привязке к сегменту.
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"IsExternalDoor: FromRoom/ToRoom недоступны: {ex.Message}");
+            }
+
+            // Помещение только с одной стороны либо стороны не определились —
+            // прежняя логика по хост-стене.
             var host = door.Host as Wall;
             if (host != null)
                 return IsExternalWall(host);
-            
+
             return false;
+        }
+
+        /// <summary>
+        /// Сторона двери — отапливаемое помещение. Неотапливаемой стороной
+        /// считаются те же категории, что и у стен (<see
+        /// cref="ThermalConstants.UnheatedOrCommonCategories"/> плюс шахта):
+        /// дверь на лоджию или в лестничную клетку — ограждающая конструкция.
+        /// </summary>
+        private static bool IsHeatedSide(Room room)
+        {
+            string name = room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "";
+            var category = RoomCategoryHelper.Detect(name);
+            return category != RoomCategory.Shaft &&
+                   !ThermalConstants.UnheatedOrCommonCategories.Contains(category);
         }
 
         private double GetDoorUValue(string material)

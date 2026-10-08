@@ -99,8 +99,10 @@ namespace QOVETER.Services
         /// решался порядком строк в JSON-ресурсе. То же у оконных узлов Г.33–Г.35,
         /// где положение рамы меняет Ψ втрое (0,054 против 0,156 при R_ут=1,5).
         ///
-        /// Пусто — исполнение не задано: из равных берётся ХУДШЕЕ по потерям,
-        /// как и остальные умолчания узлов («в запас», см. CalculationParameters.NodeDetails).
+        /// Пусто — исполнение не задано: из равных таблиц выбирает СТАДИЯ
+        /// (<see cref="ProjectStage"/>): на РД — худшая по потерям («в запас»,
+        /// как и остальные умолчания узлов, см. CalculationParameters.NodeDetails),
+        /// на П — типовая, середина равных: чертежей узлов на П ещё нет.
         /// </summary>
         public string Execution { get; set; }
 
@@ -188,7 +190,8 @@ namespace QOVETER.Services
             WallConstructionType construction,
             WallConstructionProfile profile,
             BridgeVariant variant = BridgeVariant.Convex,
-            BridgeSelectors selectors = null)
+            BridgeSelectors selectors = null,
+            ProjectStage stage = ProjectStage.RD)
         {
             if (profile == null) return null;
             selectors = selectors ?? new BridgeSelectors();
@@ -263,15 +266,16 @@ namespace QOVETER.Services
             var equallyClose = PickClosest(candidates, selectors);
             if (equallyClose.Count == 0) return null;
 
-            SP230TableDto table = null;
-            double psi = 0;
-            bool clamped = false;
-            double? row = null, column = null;
-
-            // Среди равных по числовым признакам берём таблицу с НАИБОЛЬШИМИ потерями.
-            // Раньше выигрывала первая по порядку в JSON — то есть расчёт зависел от
-            // порядка строк в ресурсе, а половина внесённых таблиц (НТЭ, положение
-            // рамы, двухслойное утепление с прослойкой) была недостижима в принципе.
+            // Среди равных по числовым признакам выбор делает СТАДИЯ, а не порядок
+            // строк в JSON (до 2026-08 выигрывала первая по порядку, и половина
+            // внесённых таблиц — НТЭ, положение рамы, двухслойное утепление
+            // с прослойкой — была недостижима в принципе):
+            //   • исполнение задано инженером или стадия РД — худшее из равных,
+            //     «в запас»: узлы в альбоме есть, незаполненное поле — недоработка;
+            //   • стадия П и исполнение не задано — СЕРЕДИНА равных по потерям:
+            //     чертежей узлов на П не существует физически, и худшее здесь —
+            //     такая же выдумка, как лучшее, только с завышением втрое (Г.33–Г.35).
+            var valid = new List<ScoredTable>();
             foreach (var candidate in equallyClose)
             {
                 double? r = profile.GetAxisValue(candidate.RowAxis) ?? selectors.GetAxisValue(candidate.RowAxis);
@@ -285,23 +289,38 @@ namespace QOVETER.Services
 
                 bool candidateClamped;
                 double candidatePsi = Interpolate(candidate, r.Value, c.Value, out candidateClamped);
-
-                if (table == null || candidatePsi > psi)
+                valid.Add(new ScoredTable
                 {
-                    table = candidate;
-                    psi = candidatePsi;
-                    clamped = candidateClamped;
-                    row = r;
-                    column = c;
-                }
+                    Table = candidate, Psi = candidatePsi, Clamped = candidateClamped,
+                    Row = r.Value, Column = c.Value
+                });
             }
 
-            if (table == null) return null;
+            if (valid.Count == 0) return null;
+            valid.Sort((a, b) => a.Psi.CompareTo(b.Psi));
+
+            bool executionAssumed = equallyClose.Count > 1 &&
+                                    string.IsNullOrWhiteSpace(selectors.Execution);
+
+            // Худшее — последний после сортировки; «типовое» — середина, при чётном
+            // числе равных берётся та из двух средних, что ХУЖЕ: оценка остаётся
+            // консервативной, просто без упора в край сетки.
+            var chosen = executionAssumed && stage == ProjectStage.P
+                ? valid[valid.Count / 2]
+                : valid[valid.Count - 1];
+
+            SP230TableDto table = chosen.Table;
+            double psi = chosen.Psi;
+            bool clamped = chosen.Clamped;
+            double? row = chosen.Row, column = chosen.Column;
 
             if (equallyClose.Count > 1)
             {
+                string policy = executionAssumed && stage == ProjectStage.P
+                    ? "взято типовое (середина по потерям, стадия П)"
+                    : "взято худшее по потерям";
                 Logger.Debug($"SP230: исполнение узла {nodeKey} не задано, равнозначных таблиц " +
-                             $"{equallyClose.Count} — взято худшее по потерям: " +
+                             $"{equallyClose.Count} — {policy}: " +
                              $"{table.Table} «{table.Variant}», Ψ={psi:F3}");
             }
 
@@ -311,14 +330,25 @@ namespace QOVETER.Services
                 TableId    = table.Table,
                 Title      = table.Title,
                 Execution  = table.Variant,
-                IsExecutionAssumed = equallyClose.Count > 1 &&
-                                     string.IsNullOrWhiteSpace(selectors.Execution),
+                IsExecutionAssumed = executionAssumed,
+                AssumedStage = stage,
                 IsClamped  = clamped,
                 RowAxis    = table.RowAxis,
                 RowValue   = row.Value,
                 ColumnAxis = table.ColumnAxis,
                 ColumnValue = column.Value
             };
+        }
+
+        /// <summary>Кандидат с уже посчитанным Ψ — чтобы выбор из равных по стадии
+        /// не пересчитывал интерполяцию дважды.</summary>
+        private class ScoredTable
+        {
+            public SP230TableDto Table;
+            public double Psi;
+            public bool Clamped;
+            public double Row;
+            public double Column;
         }
 
         /// <summary>
@@ -496,10 +526,15 @@ namespace QOVETER.Services
 
         /// <summary>
         /// Исполнение узла инженером не задано, и из нескольких равнозначных таблиц
-        /// выбрана худшая по потерям. Значение нормативное, но конструктив — принятый
-        /// «в запас», и в отчёте это надо показывать.
+        /// выбрана одна по правилу стадии (<see cref="AssumedStage"/>): на РД —
+        /// худшая по потерям («в запас»), на П — типовая (середина). Значение
+        /// нормативное, но конструктив — принятый, и в отчёте это надо показывать.
         /// </summary>
         public bool IsExecutionAssumed { get; set; }
+
+        /// <summary>Стадия, по правилу которой принято исполнение, — определяет
+        /// формулировку в <see cref="Reference"/>.</summary>
+        public ProjectStage AssumedStage { get; set; }
         /// <summary>Параметр конструкции вышел за пределы сетки таблицы и был зажат по краю.</summary>
         public bool IsClamped { get; set; }
         public string RowAxis { get; set; }
@@ -509,7 +544,11 @@ namespace QOVETER.Services
 
         public string Reference =>
             $"СП 230.1325800.2015, таблица {TableId}"
-            + (IsExecutionAssumed ? $" (исполнение не задано, принято «{Execution}» — в запас)" : "")
+            + (IsExecutionAssumed
+                ? (AssumedStage == ProjectStage.P
+                    ? $" (исполнение не задано, принято «{Execution}» — типовое, стадия П)"
+                    : $" (исполнение не задано, принято «{Execution}» — в запас)")
+                : "")
             + (IsClamped ? " (параметр вне сетки, зажат по краю)" : "");
     }
 

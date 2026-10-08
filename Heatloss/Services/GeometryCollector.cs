@@ -34,6 +34,13 @@ namespace QOVETER.Services
         public int WindowsWithDefaultSize => _elementCollector.WindowsWithDefaultSize;
 
         /// <summary>
+        /// «Окна», оказавшиеся проёмами под витраж и пропущенные при сборе:
+        /// остекление там считает сегмент витражной стены. См.
+        /// <see cref="ElementCollectorService.WindowsCoveredByCurtain"/>.
+        /// </summary>
+        public int WindowsCoveredByCurtain => _elementCollector.WindowsCoveredByCurtain;
+
+        /// <summary>
         /// Окна, найденные у помещений, но не привязанные ни к одной наружной стене.
         /// Их площадь НЕ вычтена из площади стен, а потери через них движок считает —
         /// то есть остекление учтено дважды. Ноль здесь обязателен; всё остальное
@@ -249,6 +256,14 @@ namespace QOVETER.Services
                         "типовое окно 1,2 × 1,5 м. Площадь остекления у этих помещений " +
                         "выдумана: она входит и в потери через окна, и в вычет из площади стен. " +
                         "Проверьте, в каких параметрах семейства лежат размеры.");
+                }
+
+                if (WindowsCoveredByCurtain > 0)
+                {
+                    Logger.Info(
+                        $"[Окна] {WindowsCoveredByCurtain} «окон» оказались проёмами под витраж " +
+                        "и пропущены: остекление в этих местах считает сегмент витражной стены, " +
+                        "проём поверх него был бы двойным счётом.");
                 }
 
                 int windows = rooms.Sum(r => r.Windows?.Count ?? 0);
@@ -1677,7 +1692,12 @@ namespace QOVETER.Services
                             IsExternal  = true,
                             ThermalFromModel = wallThermal.IsEntirelyFromModel,
                             ThermalNormative = wallThermal.UsedNormativeLambda,
-                            ThermalSource    = WallThermalCalculator.DescribeSource(wallThermal.Source),
+                            // Поднятие до нормируемого R — не источник данных, а признак
+                            // пробела в модели; в подписи оно главнее источника: инженер,
+                            // увидев «0,335 из слоёв», стал бы искать слои, которых нет.
+                            ThermalSource    = wallThermal.RaisedToNormative
+                                ? "поднято до нормируемого R (СП 50 табл. 3)"
+                                : WallThermalCalculator.DescribeSource(wallThermal.Source),
                             AdjacentCategory = adjacentCategory,
                             AdjacentRoomId   = adjacentRoomId,
                             // Сторона света — по вектору «наружу», посчитанному пробой,

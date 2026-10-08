@@ -153,6 +153,14 @@ namespace QOVETER.Services
             /// <summary>Назначается на шаге распределения воздухообмена.</summary>
             public double QVent;
 
+            /// <summary>
+            /// Принятый расход воздуха, м³/ч — слагаемое L, из которого получен
+            /// <see cref="QVent"/>. Хранится рядом с результатом, потому что
+            /// восстановить его из ватт может только тот, кто помнит формулу
+            /// и ΔT, а проверяет число инженер.
+            /// </summary>
+            public double VentAirFlowM3h;
+
             /// <summary>Бытовые тепловыделения, вычитаемые из этой строки (доля по квартире).</summary>
             public double QVnSubtracted;
 
@@ -268,8 +276,10 @@ namespace QOVETER.Services
 
             foreach (var computation in perRoom)
             {
+                double airFlow = GetAirFlowRate(computation.Room, parameters);
+                computation.VentAirFlowM3h = airFlow;
                 computation.QVent = ThermalConstants.AirFlowToWatts
-                                  * GetAirFlowRate(computation.Room, parameters)
+                                  * airFlow
                                   * ThermalConstants.AirDensity
                                   * ThermalConstants.AirSpecificHeat
                                   * computation.DeltaT;
@@ -302,6 +312,7 @@ namespace QOVETER.Services
                 double airFlow = n * volume;
                 totalFlow += airFlow;
 
+                computation.VentAirFlowM3h = airFlow;
                 computation.QVent = ThermalConstants.AirFlowToWatts
                                   * airFlow
                                   * ThermalConstants.AirDensity
@@ -434,8 +445,16 @@ namespace QOVETER.Services
             // Состав берётся по ТОМУ ЖЕ ключу, что и группировка. Иначе при поэтажной
             // нумерации норма считалась бы по всем этажам сразу, а раздавалась
             // помещениям одного — ровно тот дефект, что кратно завышал расход.
+            //
+            // Неотапливаемые помещения квартиры (лоджия, балкон) в норму НЕ входят:
+            // вытяжка из лоджии не проектируется, а GetAirFlowRate для неё отдал бы
+            // кратность объёма. На нижнекамской модели (прогон 2026-10-07) лоджия
+            // и балкон кв. 111 несли её номер и добавляли 24,8 м³/ч к вытяжке 160 —
+            // +15% Q вент на каждой квартире с лоджией.
             var full = all
                 .Where(r => !string.IsNullOrWhiteSpace(r.Apartment) &&
+                            r.Category != RoomCategory.Shaft &&
+                            !ThermalConstants.UnheatedOrCommonCategories.Contains(r.Category) &&
                             string.Equals(ApartmentKey(r, perLevel), apartmentKey, StringComparison.Ordinal))
                 .ToList();
 
@@ -471,8 +490,15 @@ namespace QOVETER.Services
                 .Where(r => ThermalConstants.SupplyRatedCategories.Contains(r.Category))
                 .Sum(r => r.Area * ThermalConstants.LivingRoomAirFlow);
 
+            // Вытяжка квартиры — ТОЛЬКО помещения с нормой вытяжки: кухня,
+            // санузлы, постирочная (ТЗ: «Σ вытяжка по кухне и санузлам»).
+            // Раньше сюда попадало всё, что не приток, и внутриквартирные
+            // коридоры с кладовыми добавляли кратность объёма: на нижнекамской
+            // модели коридоры кв. 111 (12,2 м²) давали +17 м³/ч к вытяжке 160.
+            // Эти помещения обслуживаются перетеканием и нормы не формируют.
             double exhaust = normRooms
-                .Where(r => !ThermalConstants.SupplyRatedCategories.Contains(r.Category))
+                .Where(r => r.Category == RoomCategory.Kitchen ||
+                            ThermalConstants.ExhaustRateByCategory.ContainsKey(r.Category))
                 .Sum(r => GetAirFlowRate(r, parameters));
 
             double airFlow = Math.Max(supply, exhaust);
@@ -524,6 +550,7 @@ namespace QOVETER.Services
             foreach (var computation in receivers)
             {
                 double share = computation.Room.Area / totalArea;
+                computation.VentAirFlowM3h = airFlow * share;
                 computation.QVent = ThermalConstants.AirFlowToWatts
                                   * (airFlow * share)
                                   * ThermalConstants.AirDensity
@@ -562,6 +589,8 @@ namespace QOVETER.Services
                 Apartment = room.Apartment ?? string.Empty,
                 Q_ogr    = Math.Round(computation.QOgr,  1),
                 Q_vent   = Math.Round(computation.QVent, 1),
+                VentAirFlow = Math.Round(computation.VentAirFlowM3h, 1),
+                DeltaT      = Math.Round(computation.DeltaT, 1),
                 // Инфильтрация. Решение принято 2026-08-04 по ТЗ: формула (1) даёт единый
                 // член Qинф/вент по расходу L = max(приток, вытяжка). Отдельного слагаемого
                 // в ТЗ нет — в отчётах колонки «Q инф» больше нет, а CalculateInfiltrationLoss
@@ -704,18 +733,30 @@ namespace QOVETER.Services
 
             // Исполнение узла из модели Revit не вытаскивается: положение рамы
             // относительно утеплителя, перфорация плиты, нахлёст — это чертёж узла,
-            // а не геометрия здания. Где инженер его не задал, берётся ХУДШЕЕ по
-            // потерям — и об этом обязана быть строка, потому что цена допущения
+            // а не геометрия здания. Где инженер его не задал, выбор делает СТАДИЯ:
+            // на П — типовое (чертежей узлов ещё нет физически), на РД — худшее
+            // по потерям. Об этом обязана быть строка, потому что цена допущения
             // велика: у оконного узла СФТК Ψ = 0,092 при раме у утеплителя (Г.33)
             // против 0,433 при раме, смещённой от него (Г.35, по примечанию СП
             // худший вариант). Задаётся в CalculationParameters.NodeDetails.Execution.
             int assumed = rooms.SelectMany(c => c.Reduced.Nodes).Count(n => n.IsExecutionAssumed);
             if (assumed > 0)
             {
-                Logger.Warn(
-                    $"    исполнение узла не задано у {assumed} узлов — принято ХУДШЕЕ по потерям " +
-                    "(оценка в запас). Знаете свой узел — укажите его в настройках расчёта: " +
-                    "«FrameAtInsulation», «FrameShiftedIntoInsulation», «ThermalInsert» и т. п.");
+                if (parameters.Stage == ProjectStage.P)
+                {
+                    Logger.Info(
+                        $"    исполнение узла не задано у {assumed} узлов — принято ТИПОВОЕ " +
+                        "(середина сетки СП 230, стадия П). На стадии РД переключите стадию " +
+                        "и задайте исполнение по альбому узлов в файле объекта — " +
+                        "не заданное там будет принято худшим, в запас.");
+                }
+                else
+                {
+                    Logger.Warn(
+                        $"    исполнение узла не задано у {assumed} узлов — принято ХУДШЕЕ по потерям " +
+                        "(оценка в запас, стадия РД). Знаете свой узел — укажите его в настройках расчёта: " +
+                        "«FrameAtInsulation», «FrameShiftedIntoInsulation», «ThermalInsert» и т. п.");
+                }
             }
 
             foreach (var group in rooms.SelectMany(c => c.Reduced.SkippedNodes)
@@ -873,7 +914,7 @@ namespace QOVETER.Services
             var reduced = _reducedResistance.Calculate(
                 room, conditionalU, parameters.ReducedResistance,
                 parameters.HomogeneityFactor, buildingParams.FloorHeight,
-                room.WallConstruction, parameters.NodeDetails);
+                room.WallConstruction, parameters.NodeDetails, parameters.Stage);
 
             if (wallArea > 0 && reduced.ReducedU > 0)
             {
@@ -921,8 +962,18 @@ namespace QOVETER.Services
             foreach (var door in room.Doors.Where(d => d.IsExternal))
             {
                 double doorDeltaT = SurfaceDeltaT(door, tInt, deltaT, room, parameters);
-                // Для двери берём ОБЩУЮ высоту здания (β = k·H_здания, не H_этажа)
-                double doorBeta = door.CalculateDoorBetaCoefficient(buildingParams.TotalHeight, buildingParams.DoorBetaCoefficients);
+                // Для двери берём ОБЩУЮ высоту здания (β = k·H_здания, не H_этажа).
+                //
+                // Надбавка на врывание — только у двери В НАРУЖНЫЙ ВОЗДУХ:
+                // ТЗ даёт её для входных дверей здания, через которые врывается
+                // уличный воздух. Балконная дверь на остеклённую лоджию и дверь
+                // квартиры в лестничную клетку — ограждения с малой ΔT, врывания
+                // улицы за ними нет. Пока двери шли с нулевой площадью, это
+                // молчало; с настоящими габаритами β = 0,22·H утраивала бы
+                // потери каждой балконной двери.
+                double doorBeta = door.AdjacentCategory.HasValue
+                    ? 0
+                    : door.CalculateDoorBetaCoefficient(buildingParams.TotalHeight, buildingParams.DoorBetaCoefficients);
                 details.DoorLoss += door.CalculateHeatLoss(doorDeltaT) * (1 + betaSum + doorBeta);
 
                 if (doorBeta > 0)
