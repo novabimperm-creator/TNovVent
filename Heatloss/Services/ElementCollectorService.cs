@@ -168,7 +168,7 @@ namespace QOVETER.Services
                         {
                             WindowsCoveredByCurtain++;
                             Logger.Debug(
-                                $"[Окно] {window.Name} (id {window.Id.IntegerValue}): " +
+                                $"[Окно] {window.Name} (id {window.Id.LongValue()}): " +
                                 "перед проёмом витраж из границы помещения — остекление " +
                                 "считает его сегмент, окно пропущено");
                             continue;
@@ -436,7 +436,7 @@ namespace QOVETER.Services
             if (doorInfo.Width <= 0 || doorInfo.Height <= 0)
             {
                 Logger.Debug(
-                    $"[Дверь] {door.Name} (id {door.Id.IntegerValue}): габариты не прочитаны " +
+                    $"[Дверь] {door.Name} (id {door.Id.LongValue()}): габариты не прочитаны " +
                     $"(Ш={doorInfo.Width:F2} В={doorInfo.Height:F2}) — принята дверь 0,9 × 2,1 м");
                 if (doorInfo.Width  <= 0) doorInfo.Width  = 0.9;
                 if (doorInfo.Height <= 0) doorInfo.Height = 2.1;
