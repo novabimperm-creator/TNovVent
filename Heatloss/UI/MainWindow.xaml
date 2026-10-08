@@ -163,6 +163,18 @@
                              сверка с ним идёт по разным формулам. -->
                         <CheckBox x:Name="SubtractInternalGainsCheck" Content="Вычитать бытовые (для сверки)" IsChecked="False" FontWeight="Normal" Margin="0,4,0,0"
                                   ToolTip="Бытовые тепловыделения (колонка «Q вн») вычитаются из итога, как в формуле (1) ТЗ. Для подбора приборов отопления галочку обычно снимают: тогда итог считается без вычета, с запасом."/>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Стадия:" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" x:Name="StageCombo" Height="26" Margin="8,0,0,0" SelectedIndex="0"
+                                      ToolTip="Что делать, когда исполнение узла фасада не задано. П — листа узлов ещё не существует: из равных таблиц СП 230 берётся типовая (середина по потерям). РД — узлы есть в альбоме: задайте их в файле объекта, а не заданное будет принято худшим, в запас.">
+                                <ComboBoxItem Content="П — узлы типовые"/>
+                                <ComboBoxItem Content="РД — узлы из файла, иначе в запас"/>
+                            </ComboBox>
+                        </Grid>
                     </StackPanel>
                 </GroupBox>
                 
@@ -173,7 +185,7 @@
                         <TextBlock x:Name="CityInfoText" Margin="0,5,0,10" TextWrapping="Wrap" FontSize="11" Foreground="#FF7F8C8D"/>
                         <Button x:Name="SettingsButton" Content="⚙ Настройки ориентации..." Height="30" Click="SettingsButton_Click" Style="{StaticResource ButtonStyle}" Background="#FF34495E" Padding="10,2"/>
                         <Button x:Name="RoomTempSettingsButton" Content="🌡 Температуры по комнатам..." Height="30" Margin="0,5,0,0" Click="RoomTempSettingsButton_Click" Style="{StaticResource ButtonStyle}" Background="#FF34495E" Padding="10,2"/>
-                        <Button x:Name="NodeSettingsButton" Content="🧱 Узлы фасада (по объекту)..." Height="30" Margin="0,5,0,0" Click="NodeSettingsButton_Click" Style="{StaticResource ButtonStyle}" Background="#FF34495E" Padding="10,2" ToolTip="Положение оконной рамы относительно утеплителя, нахлёст, зуб, перфорация плиты. Из модели не читаются — это чертёж узла. Файл кладётся рядом с моделью: на другом объекте узел будет другим. Пока не задано, СП-каталог берёт худший вариант по потерям."/>
+                        <Button x:Name="NodeSettingsButton" Content="🧱 Узлы фасада (по объекту)..." Height="30" Margin="0,5,0,0" Click="NodeSettingsButton_Click" Style="{StaticResource ButtonStyle}" Background="#FF34495E" Padding="10,2" ToolTip="Положение оконной рамы относительно утеплителя, нахлёст, зуб, перфорация плиты. Из модели не читаются — это чертёж узла. Файл кладётся рядом с моделью: на другом объекте узел будет другим. Пока не задано, выбор делает стадия: П — типовой вариант, РД — худший по потерям."/>
                     </StackPanel>
                 </GroupBox>
                 

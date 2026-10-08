@@ -1631,17 +1631,24 @@ namespace QOVETER.UI
                     // по одному этажу уходит в отчёт как «итого по зданию».
                     ScopeName = IsAllLevelsSelected()
                         ? "ПО ЗДАНИЮ"
-                        : $"ПО ЭТАЖУ «{(LevelsCombo.SelectedItem as LevelInfo)?.Name}»"
+                        : $"ПО ЭТАЖУ «{(LevelsCombo.SelectedItem as LevelInfo)?.Name}»",
+                    // Стадия решает умолчание незаданного исполнения узлов:
+                    // П — типовое (листа узлов ещё нет), РД — худшее, в запас.
+                    Stage = StageCombo.SelectedIndex == 1 ? ProjectStage.RD : ProjectStage.P
                 };
 
                 // Исполнение узлов фасада — свойство ОБЪЕКТА, а не программы:
                 // положение оконной рамы относительно утеплителя, нахлёст, зуб,
                 // перфорация плиты из модели не вытаскиваются, а на другом доме
                 // будут другими. Поэтому читается файл, привязанный к модели;
-                // нет файла — остаются умолчания «в запас» (худшее из равных),
-                // и об этом пишет и журнал, и лист «Параметры» отчёта.
+                // нет файла — остаются умолчания стадии (П — типовое из равных,
+                // РД — худшее, в запас), и об этом пишет и журнал,
+                // и лист «Параметры» отчёта.
                 parameters.NodeDetails = ThermalNodeSettings.Load(
-                    _document?.PathName, parameters.NodeDetails, out _nodeSettingsSource);
+                    _document?.PathName, parameters.NodeDetails, out _nodeSettingsSource,
+                    parameters.Stage);
+                _nodeSettingsSource =
+                    $"стадия {(parameters.Stage == ProjectStage.RD ? "РД" : "П")}; {_nodeSettingsSource}";
                 Logger.Info($"[Узлы] исполнение узлов: {_nodeSettingsSource}");
 
                 // Метод воздухообмена — тоже свойство ОБЪЕКТА: у разных заказчиков

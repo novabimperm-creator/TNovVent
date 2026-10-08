@@ -733,18 +733,30 @@ namespace QOVETER.Services
 
             // Исполнение узла из модели Revit не вытаскивается: положение рамы
             // относительно утеплителя, перфорация плиты, нахлёст — это чертёж узла,
-            // а не геометрия здания. Где инженер его не задал, берётся ХУДШЕЕ по
-            // потерям — и об этом обязана быть строка, потому что цена допущения
+            // а не геометрия здания. Где инженер его не задал, выбор делает СТАДИЯ:
+            // на П — типовое (чертежей узлов ещё нет физически), на РД — худшее
+            // по потерям. Об этом обязана быть строка, потому что цена допущения
             // велика: у оконного узла СФТК Ψ = 0,092 при раме у утеплителя (Г.33)
             // против 0,433 при раме, смещённой от него (Г.35, по примечанию СП
             // худший вариант). Задаётся в CalculationParameters.NodeDetails.Execution.
             int assumed = rooms.SelectMany(c => c.Reduced.Nodes).Count(n => n.IsExecutionAssumed);
             if (assumed > 0)
             {
-                Logger.Warn(
-                    $"    исполнение узла не задано у {assumed} узлов — принято ХУДШЕЕ по потерям " +
-                    "(оценка в запас). Знаете свой узел — укажите его в настройках расчёта: " +
-                    "«FrameAtInsulation», «FrameShiftedIntoInsulation», «ThermalInsert» и т. п.");
+                if (parameters.Stage == ProjectStage.P)
+                {
+                    Logger.Info(
+                        $"    исполнение узла не задано у {assumed} узлов — принято ТИПОВОЕ " +
+                        "(середина сетки СП 230, стадия П). На стадии РД переключите стадию " +
+                        "и задайте исполнение по альбому узлов в файле объекта — " +
+                        "не заданное там будет принято худшим, в запас.");
+                }
+                else
+                {
+                    Logger.Warn(
+                        $"    исполнение узла не задано у {assumed} узлов — принято ХУДШЕЕ по потерям " +
+                        "(оценка в запас, стадия РД). Знаете свой узел — укажите его в настройках расчёта: " +
+                        "«FrameAtInsulation», «FrameShiftedIntoInsulation», «ThermalInsert» и т. п.");
+                }
             }
 
             foreach (var group in rooms.SelectMany(c => c.Reduced.SkippedNodes)
@@ -902,7 +914,7 @@ namespace QOVETER.Services
             var reduced = _reducedResistance.Calculate(
                 room, conditionalU, parameters.ReducedResistance,
                 parameters.HomogeneityFactor, buildingParams.FloorHeight,
-                room.WallConstruction, parameters.NodeDetails);
+                room.WallConstruction, parameters.NodeDetails, parameters.Stage);
 
             if (wallArea > 0 && reduced.ReducedU > 0)
             {
