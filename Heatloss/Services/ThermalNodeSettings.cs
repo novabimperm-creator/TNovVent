@@ -228,6 +228,93 @@ namespace QOVETER.Services
         }
 
         /// <summary>
+        /// Источник R и ручные R объекта из файла объекта. Файла нет или поле
+        /// источника пустое — false, остаются умолчания окна.
+        ///
+        /// <para>Свойство ОБЪЕКТА, как узлы и воздухообмен: модель АР одного дома
+        /// устарела, другого — нет, и R стен одного проекта к другому не относится.</para>
+        /// </summary>
+        public static bool TryLoadResistances(string modelPath, out ResistanceSource source,
+                                              out ManualResistances manual, out bool applyRegionalFactor)
+        {
+            source = ResistanceSource.Model;
+            manual = new ManualResistances();
+            applyRegionalFactor = true;
+
+            ThermalNodeFile file = ReadFile(ExistingPath(modelPath));
+            if (file == null || string.IsNullOrWhiteSpace(file.ResistanceSource)) return false;
+
+            ResistanceSource parsed;
+            if (!Enum.TryParse(file.ResistanceSource.Trim(), true, out parsed) ||
+                !Enum.IsDefined(typeof(ResistanceSource), parsed))
+            {
+                Logger.Warn($"[Норматив] источник R «{file.ResistanceSource}» не распознан — " +
+                            $"остаётся умолчание. Допустимые: {string.Join(", ", Enum.GetNames(typeof(ResistanceSource)))}");
+                return false;
+            }
+
+            source = parsed;
+            manual = new ManualResistances
+            {
+                Wall = file.RWall, Window = file.RWindow, Roof = file.RRoof, Floor = file.RFloor
+            };
+            applyRegionalFactor = file.ApplyRegionalFactor ?? true;
+            return true;
+        }
+
+        /// <summary>
+        /// Записывает источник R и ручные R в файл объекта, сохраняя всё остальное
+        /// (узлы, воздухообмен). Файла нет — создаётся из шаблона рядом с моделью,
+        /// при неудаче — в профиле, по имени модели. Возвращает путь или null.
+        /// </summary>
+        public static string SaveResistances(string modelPath, ResistanceSource source,
+                                             ManualResistances manual, bool applyRegionalFactor)
+        {
+            string path = ExistingPath(modelPath);
+            ThermalNodeFile file = ReadFile(path) ?? BuildTemplate(modelPath, new CalculationParameters().NodeDetails);
+
+            file.ResistanceSource = source.ToString();
+            file.RWall   = manual?.Wall;
+            file.RWindow = manual?.Window;
+            file.RRoof   = manual?.Roof;
+            file.RFloor  = manual?.Floor;
+            file.ApplyRegionalFactor = applyRegionalFactor;
+            file.ResistanceHelp = ResistanceHelpText;
+
+            if (path != null) return TryWrite(path, file) ? path : null;
+
+            string beside = ModelSidePath(modelPath);
+            if (!string.IsNullOrEmpty(beside) && TryWrite(beside, file)) return beside;
+
+            string profile = ProfilePath(modelPath);
+            return TryWrite(profile, file) ? profile : null;
+        }
+
+        private const string ResistanceHelpText =
+            "ResistanceSource: Model — R из слоёв модели АР; Normative — по СП 50.13330.2024 табл. 3 " +
+            "через ГСОП города, с понижающим m_p по п. 5.2 (ApplyRegionalFactor). " +
+            "RWall, RWindow, RRoof, RFloor — R объекта одним числом на вид ограждения, м²·°С/Вт, " +
+            "главнее норматива; null — норма (окна — модель). Задаются в окне расчёта.";
+
+        private static ThermalNodeFile ReadFile(string path)
+        {
+            if (path == null || !File.Exists(path)) return null;
+            try
+            {
+                using (var stream = File.OpenRead(path))
+                {
+                    var serializer = new DataContractJsonSerializer(typeof(ThermalNodeFile));
+                    return serializer.ReadObject(stream) as ThermalNodeFile;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[Узлы] не удалось прочитать {path}", ex);
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Исполнения узлов, которые реально есть в каталоге СП 230: только они
         /// имеют смысл в файле настроек. Служебные «Default», «Convex», «Concave»
         /// в список не идут — их выбирает не инженер, а сам узел.
@@ -434,5 +521,14 @@ namespace QOVETER.Services
         [DataMember(Order = 26)] public string AnchorsHelp { get; set; }
         [DataMember(Order = 27)] public double? AnchorL1Mm { get; set; }
         [DataMember(Order = 28)] public string AnchorL1Help { get; set; }
+
+        // Источник R ограждений и ручные R объекта (заявка ОВ 2026-10-15).
+        [DataMember(Order = 29)] public string ResistanceSource { get; set; }
+        [DataMember(Order = 30)] public double? RWall { get; set; }
+        [DataMember(Order = 31)] public double? RWindow { get; set; }
+        [DataMember(Order = 32)] public double? RRoof { get; set; }
+        [DataMember(Order = 33)] public double? RFloor { get; set; }
+        [DataMember(Order = 34)] public string ResistanceHelp { get; set; }
+        [DataMember(Order = 35)] public bool? ApplyRegionalFactor { get; set; }
     }
 }

@@ -141,7 +141,9 @@ namespace QOVETER.Services
             double areaNorm  = p.WallAreaNormativeM2;
             double areaGuess = p.WallAreaEstimatedM2;
             double areaAll   = areaKnown + areaNorm + areaGuess;
-            if (areaAll > 0)
+            // По нормируемому R слои модели в расчёт уличных ограждений не идут,
+            // и призыв «заполните материалы» здесь был бы ложной тревогой.
+            if (areaAll > 0 && !p.ResistanceIsNormative)
             {
                 row++;
                 Put("Ограждения по данным модели, м²",      Math.Round(areaKnown, 1));
@@ -248,6 +250,12 @@ namespace QOVETER.Services
             {
                 row++;
                 Put("Воздухообмен", p.VentilationSource);
+            }
+
+            if (!string.IsNullOrWhiteSpace(p.ResistanceSource))
+            {
+                row++;
+                Put("Сопротивления ограждений", p.ResistanceSource);
             }
 
             // ── Ограждения в грунте ──────────────────────────────────────────
@@ -764,6 +772,16 @@ namespace QOVETER.Services
         /// видеть, по какой считали.
         /// </summary>
         public string VentilationSource { get; set; }
+
+        /// <summary>
+        /// Откуда взяты R ограждений: из модели или по нормируемому (СП 50
+        /// табл. 3) с самими числами. Без этой строки отчёт по нормативу
+        /// неотличим от расчёта по слоям АР.
+        /// </summary>
+        public string ResistanceSource { get; set; }
+
+        /// <summary>R наружных ограждений взяты по нормируемому, а не из слоёв модели.</summary>
+        public bool ResistanceIsNormative { get; set; }
 
         /// <summary>Площадь пола по грунту, посчитанная зональным методом, м².</summary>
         public double GroundFloorAreaM2 { get; set; }

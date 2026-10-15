@@ -74,6 +74,7 @@ namespace QOVETER.Services
                 c => parameters.RoomTemperatures?.GetTemperature(c));
 
             LogUnheatedTemperatures(parameters);
+            LogResistanceSource(parameters);
 
             // Шаг 1. Трансмиссионные теплопотери и бытовые тепловыделения — покомнатно.
             Perf.Reset();
@@ -910,9 +911,15 @@ namespace QOVETER.Services
 
             wallArea = Math.Max(0, wallArea - buriedWallArea);
 
-            double conditionalU = GetConditionalWallU(room, wallArea);
+            // По нормируемому: R таблицы 3 СП 50 уже ПРИВЕДЁННОЕ (п. 5.1), узлы
+            // СП 230 поверх него посчитали бы мостики второй раз — приведение выключено.
+            bool normative = IsNormative(parameters);
+            double conditionalU = normative
+                ? NormativeWallU(room, wallArea, parameters)
+                : GetConditionalWallU(room, wallArea);
             var reduced = _reducedResistance.Calculate(
-                room, conditionalU, parameters.ReducedResistance,
+                room, conditionalU,
+                normative ? ReducedResistanceMode.Off : parameters.ReducedResistance,
                 parameters.HomogeneityFactor, buildingParams.FloorHeight,
                 room.WallConstruction, parameters.NodeDetails, parameters.Stage);
 
@@ -935,7 +942,16 @@ namespace QOVETER.Services
             // 1а. Заглублённые стены — зональный метод СП 50.13330.2024 Г.7.
             //     Надбавки β к ним не применяются: они про обдув и инсоляцию,
             //     а стена в грунте не обдувается и не освещается.
-            if (room.GroundWallZones != null && room.GroundWallZones.Count > 0)
+            if (normative && room.GroundWallZones != null && room.GroundWallZones.Count > 0)
+            {
+                // Табл. 3 графа 3 — «стен, включая стены в грунте»: приведённое R
+                // такой стены (с грунтом) нормируется наравне с наружной.
+                double buriedArea = room.GroundWallZones.Sum(z => z.AreaM2);
+                double buriedLoss = buriedArea / EnclosureR(NormativeResistance.Enclosure.Wall, parameters) * deltaT;
+                details.WallLoss += buriedLoss;
+                Logger.Debug($"[Норматив] {room.Name}: стены в грунте {buriedArea:F1} м² → Q={buriedLoss:F1} Вт");
+            }
+            else if (room.GroundWallZones != null && room.GroundWallZones.Count > 0)
             {
                 double buriedLoss = GroundContact.HeatLossW(
                     GroundEnclosure.Wall, room.GroundWallZones, deltaT,
@@ -955,7 +971,7 @@ namespace QOVETER.Services
             foreach (var window in room.Windows)
             {
                 double windowDeltaT = SurfaceDeltaT(window, tInt, deltaT, room, parameters);
-                details.WindowLoss += window.CalculateHeatLoss(windowDeltaT) * (1 + betaSum);
+                details.WindowLoss += WindowU(window, parameters) * window.Area * windowDeltaT * (1 + betaSum);
             }
 
             // 3. Теплопотери через наружные двери
@@ -991,7 +1007,17 @@ namespace QOVETER.Services
             //    для пола над НЕотапливаемым подвалом — там за полом действительно
             //    воздух, а не грунт. Само число 5 °C по-прежнему настройка, а не
             //    норматив, и это отдельная работа.
-            if (room.GroundFloorZones != null && room.GroundFloorZones.Count > 0)
+            if (normative && room.GroundFloorZones != null && room.GroundFloorZones.Count > 0)
+            {
+                // Табл. 3 графа 5 — «… полов по грунту»: нормируется приведённое R
+                // пола вместе с грунтом, поэтому зоны здесь не нужны — поток
+                // A/R·ΔT до наружного воздуха, как и у зонального метода.
+                double groundArea = room.GroundFloorZones.Sum(z => z.AreaM2);
+                details.FloorLoss = groundArea /
+                    EnclosureR(NormativeResistance.Enclosure.FloorOverUnheated, parameters) * deltaT;
+                Logger.Debug($"[Норматив] {room.Name}: пол по грунту {groundArea:F1} м² → Q={details.FloorLoss:F1} Вт");
+            }
+            else if (room.GroundFloorZones != null && room.GroundFloorZones.Count > 0)
             {
                 double floorR = GetFloorLayersR(room);
 
@@ -1007,14 +1033,18 @@ namespace QOVETER.Services
             }
             else if (room.IsFirstFloor)
             {
-                double kFloor = GetFloorUValue(room);
+                double kFloor = normative
+                    ? 1.0 / EnclosureR(NormativeResistance.Enclosure.FloorOverUnheated, parameters)
+                    : GetFloorUValue(room);
                 details.FloorLoss = kFloor * room.Area * floorDeltaT;
             }
 
             // 5. Теплопотери через потолок/крышу последнего этажа
             if (room.IsLastFloor)
             {
-                double kRoof = GetRoofUValue(room);
+                double kRoof = normative
+                    ? 1.0 / EnclosureR(NormativeResistance.Enclosure.Roof, parameters)
+                    : GetRoofUValue(room);
                 details.RoofLoss = kRoof * room.Area * deltaT;
             }
 
@@ -1045,7 +1075,9 @@ namespace QOVETER.Services
             double sum = 0;
             foreach (var wall in external)
             {
-                double u = wall.UValue > 0 ? wall.UValue : conditionalU;
+                double u = IsNormative(parameters)
+                    ? WallU(wall, conditionalU, parameters)
+                    : (wall.UValue > 0 ? wall.UValue : conditionalU);
                 double area = wall.Area * (1 - Clamp01(wall.BuriedFraction));
                 if (area <= 0) continue;
 
@@ -1166,6 +1198,134 @@ namespace QOVETER.Services
                 foreach (var v in byTable.Take(20))
                     Logger.Debug($"  [Баланс] {v.RoomName} ({v.Category}): {v.Temperature:F1} °C — {v.Note}");
             }
+        }
+
+        // ─── Режим «по нормируемому» (СП 50.13330.2024 табл. 3, п. 5.2) ──────
+
+        private static bool IsNormative(CalculationParameters parameters) =>
+            parameters.ResistanceSource == ResistanceSource.Normative && parameters.DegreeDays > 0;
+
+        /// <summary>
+        /// R ограждения в режиме норматива, м²·°С/Вт: заданное инженером на объект,
+        /// иначе R_тр по табл. 3 × m_p (формула 5.1). Для окна норматив не
+        /// применяется — см. <see cref="WindowU"/>.
+        /// </summary>
+        internal static double EnclosureR(NormativeResistance.Enclosure enclosure, CalculationParameters parameters)
+        {
+            double? manual = ManualR(enclosure, parameters);
+            if (manual.HasValue) return manual.Value;
+
+            double factor = parameters.ApplyRegionalFactor
+                ? NormativeResistance.MinRegionalFactor(enclosure)
+                : 1.0;
+            return NormativeResistance.Required(enclosure, parameters.DegreeDays) * factor;
+        }
+
+        private static double? ManualR(NormativeResistance.Enclosure enclosure, CalculationParameters parameters)
+        {
+            var m = parameters.ManualResistances;
+            if (m == null) return null;
+
+            double? r;
+            switch (enclosure)
+            {
+                case NormativeResistance.Enclosure.Wall:   r = m.Wall;   break;
+                case NormativeResistance.Enclosure.Window: r = m.Window; break;
+                case NormativeResistance.Enclosure.Roof:   r = m.Roof;   break;
+                default:                                   r = m.Floor;  break;
+            }
+            return r.HasValue && ManualResistances.IsPlausible(r.Value) ? r : null;
+        }
+
+        /// <summary>
+        /// U стены в режиме норматива. Норматив — только для стены К НАРУЖНОМУ
+        /// ВОЗДУХУ: стена в лоджию, лестницу или шахту остаётся по модели
+        /// (<paramref name="modelU"/> — для стен, у которых своего U нет).
+        /// </summary>
+        private static double WallU(WallInfo wall, double modelU, CalculationParameters parameters)
+        {
+            if (!wall.AdjacentCategory.HasValue)
+                return 1.0 / EnclosureR(NormativeResistance.Enclosure.Wall, parameters);
+            return wall.UValue > 0 ? wall.UValue : modelU;
+        }
+
+        /// <summary>
+        /// U окна: в режиме норматива уличное окно берёт R, заданное инженером;
+        /// не задано — остаётся модель. По норме окно не считается: табличное
+        /// 0,6–0,7 хуже реальных окон, и проектировщики ОВ это отвергли (2026-10-15).
+        /// </summary>
+        private static double WindowU(WindowInfo window, CalculationParameters parameters)
+        {
+            if (IsNormative(parameters) && !window.AdjacentCategory.HasValue)
+            {
+                double? manual = ManualR(NormativeResistance.Enclosure.Window, parameters);
+                if (manual.HasValue) return 1.0 / manual.Value;
+            }
+            return window.UValue;
+        }
+
+        /// <summary>
+        /// Средневзвешенное по площади U наружных стен помещения в режиме норматива.
+        /// Без списка стен (старые фикстуры) вся площадь считается уличной.
+        /// </summary>
+        private static double NormativeWallU(RoomData room, double wallArea, CalculationParameters parameters)
+        {
+            double modelU = GetConditionalWallU(room, wallArea);
+            var external = room.Walls?.Where(w => w.IsExternal && w.Area > 0).ToList();
+            if (external == null || external.Count == 0)
+                return 1.0 / EnclosureR(NormativeResistance.Enclosure.Wall, parameters);
+
+            double area = external.Sum(w => w.Area);
+            return external.Sum(w => WallU(w, modelU, parameters) * w.Area) / area;
+        }
+
+        /// <summary>
+        /// Какие R приняты — в журнал одной строкой с числами и ссылкой. Это вход
+        /// расчёта того же веса, что t наруж: по нему проверяют весь отчёт.
+        /// </summary>
+        private static void LogResistanceSource(CalculationParameters parameters)
+        {
+            if (parameters.ResistanceSource != ResistanceSource.Normative) return;
+
+            if (parameters.DegreeDays <= 0)
+            {
+                Logger.Warn("[Норматив] выбран расчёт по нормируемому R, но ГСОП не определён " +
+                            "(город без отопительного периода) — сопротивления взяты ИЗ МОДЕЛИ");
+                return;
+            }
+
+            Logger.Info("[Норматив] " + DescribeNormativeResistances(parameters));
+        }
+
+        /// <summary>Принятые R словами — для журнала и листа «Параметры» отчёта.</summary>
+        public static string DescribeNormativeResistances(CalculationParameters parameters)
+        {
+            Func<NormativeResistance.Enclosure, string, string> one = (e, name) =>
+            {
+                double? manual = ManualR(e, parameters);
+                if (manual.HasValue) return $"{name} {manual.Value:F2} (задано вручную)";
+
+                double required = NormativeResistance.Required(e, parameters.DegreeDays);
+                if (!parameters.ApplyRegionalFactor) return $"{name} {required:F2}";
+
+                double mp = NormativeResistance.MinRegionalFactor(e);
+                return $"{name} {required:F2}×{mp:F2} = {required * mp:F2}";
+            };
+
+            double? window = ManualR(NormativeResistance.Enclosure.Window, parameters);
+
+            return $"R по нормируемому, СП 50.13330.2024 табл. 3 при ГСОП {parameters.DegreeDays:F0}" +
+                   (parameters.ApplyRegionalFactor ? ", с понижающим m_p по п. 5.2" : "") + ": " +
+                   one(NormativeResistance.Enclosure.Wall, "стены (и стены в грунте)") + "; " +
+                   one(NormativeResistance.Enclosure.Roof, "покрытие") + "; " +
+                   one(NormativeResistance.Enclosure.FloorOverUnheated, "пол над подвалом и по грунту") + "; " +
+                   (window.HasValue ? $"окна {window.Value:F2} (задано вручную)" : "окна — по модели") +
+                   " м²·°С/Вт. Узлы СП 230 не добавляются: табличное R уже приведённое. " +
+                   (parameters.ApplyRegionalFactor
+                       ? "Снижение m_p допустимо при выполнении удельной характеристики расхода " +
+                         "тепловой энергии по п. 10.1 (приложение Б) — это подтверждает раздел ЭЭ. "
+                       : "") +
+                   "По модели остались ограждения к лоджиям, лестницам и шахтам и двери.";
         }
 
         /// <summary>

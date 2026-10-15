@@ -175,6 +175,46 @@
                                 <ComboBoxItem Content="РД — узлы из файла, иначе в запас"/>
                             </ComboBox>
                         </Grid>
+                        <!-- Заявка ОВ 2026-10-15: модели АР на стадии расчёта отопления
+                             часто неактуальны, и разбор слоёв считает дом, которого нет. -->
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="R ограждений:" VerticalAlignment="Center"/>
+                            <ComboBox Grid.Column="1" x:Name="ResistanceSourceCombo" Height="26" Margin="8,0,0,0" SelectedIndex="0"
+                                      SelectionChanged="ResistanceSourceCombo_SelectionChanged"
+                                      ToolTip="Из модели — слои и материалы АР, мостики по СП 230. По нормируемому — модель АР нужна только для площадей и ориентации: стены, кровля и пол к улице и грунту получают R по СП 50.13330.2024 табл. 3 для выбранного города, либо R, заданное ниже. Окна — заданное R, иначе из модели. Ограждения к лоджиям, лестницам и шахтам и двери остаются по модели.">
+                                <ComboBoxItem Content="Из модели"/>
+                                <ComboBoxItem Content="По нормируемому (СП 50, табл. 3)"/>
+                            </ComboBox>
+                        </Grid>
+                        <StackPanel x:Name="ManualResistancePanel" Visibility="Collapsed" Margin="0,4,0,0">
+                            <CheckBox x:Name="RegionalFactorCheck" Content="Понижающий m_p (СП 50 п. 5.2)" IsChecked="True" FontWeight="Normal"
+                                      ToolTip="Стены ×0,63, кровля и пол ×0,80 — наименьшие значения п. 5.2. Допустимо, если удельная характеристика расхода тепловой энергии выполняется по п. 10.1 (раздел ЭЭ)."/>
+                            <TextBlock Text="R вручную, м²·°С/Вт (пусто — норма; окна — модель):" FontSize="11" Foreground="#FF7F8C8D" Margin="0,4,0,2" TextWrapping="Wrap"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="стены" VerticalAlignment="Center"/>
+                                <TextBox   Grid.Row="0" Grid.Column="1" x:Name="RWallBox" Margin="4,1,8,1" TextAlignment="Right"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="окна" VerticalAlignment="Center"/>
+                                <TextBox   Grid.Row="0" Grid.Column="3" x:Name="RWindowBox" Margin="4,1,0,1" TextAlignment="Right"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="кровля" VerticalAlignment="Center"/>
+                                <TextBox   Grid.Row="1" Grid.Column="1" x:Name="RRoofBox" Margin="4,1,8,1" TextAlignment="Right"/>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="пол" VerticalAlignment="Center"/>
+                                <TextBox   Grid.Row="1" Grid.Column="3" x:Name="RFloorBox" Margin="4,1,0,1" TextAlignment="Right"/>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </GroupBox>
                 

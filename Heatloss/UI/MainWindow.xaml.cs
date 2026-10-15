@@ -59,6 +59,10 @@ namespace QOVETER.UI
         /// <summary>Как считался воздухообмен в последнем расчёте — на лист «Параметры».</summary>
         private string _ventilationSource = "";
 
+        /// <summary>Откуда взяты R ограждений — для листа «Параметры» отчёта.</summary>
+        private string _resistanceSourceNote = "";
+        private bool _resistanceIsNormative;
+
         public MainWindow(Document document)
         {
             _document = document;
@@ -99,6 +103,7 @@ namespace QOVETER.UI
             ExportLibraries.EnsureResolverInstalled();
             WarnIfExcelExportUnavailable();
             LoadCities();
+            LoadResistanceSettings();
 
             LevelsCombo.SelectionChanged += LevelsCombo_SelectionChanged;
             CitiesCombo.SelectionChanged += CitiesCombo_SelectionChanged;
@@ -1636,8 +1641,34 @@ namespace QOVETER.UI
                         : $"ПО ЭТАЖУ «{(LevelsCombo.SelectedItem as LevelInfo)?.Name}»",
                     // Стадия решает умолчание незаданного исполнения узлов:
                     // П — типовое (листа узлов ещё нет), РД — худшее, в запас.
-                    Stage = StageCombo.SelectedIndex == 1 ? ProjectStage.RD : ProjectStage.P
+                    Stage = StageCombo.SelectedIndex == 1 ? ProjectStage.RD : ProjectStage.P,
+                    // По нормируемому: из модели АР берутся только площади и соседство,
+                    // R наружных ограждений — СП 50 табл. 3 по ГСОП выбранного города.
+                    ResistanceSource = ResistanceSourceCombo.SelectedIndex == 1
+                        ? ResistanceSource.Normative
+                        : ResistanceSource.Model,
+                    DegreeDays = ResolveDegreeDays(),
+                    ApplyRegionalFactor = RegionalFactorCheck.IsChecked ?? true
                 };
+
+                ManualResistances manual;
+                string manualError;
+                if (!TryReadManualResistances(out manual, out manualError))
+                {
+                    ShowErrorMessage(manualError);
+                    return;
+                }
+                parameters.ManualResistances = manual;
+
+                // Режим и ручные R — свойство объекта: сохраняются рядом с моделью,
+                // чтобы при следующем запуске не вбивать их заново.
+                ThermalNodeSettings.SaveResistances(
+                    _document?.PathName, parameters.ResistanceSource, manual, parameters.ApplyRegionalFactor);
+
+                _resistanceIsNormative = parameters.ResistanceSource == ResistanceSource.Normative;
+                _resistanceSourceNote = _resistanceIsNormative
+                    ? CalculationEngine.DescribeNormativeResistances(parameters)
+                    : "из модели: слои и материалы АР, мостики по СП 230";
 
                 // Исполнение узлов фасада — свойство ОБЪЕКТА, а не программы:
                 // положение оконной рамы относительно утеплителя, нахлёст, зуб,
@@ -1817,6 +1848,8 @@ namespace QOVETER.UI
                 p.ShaftTemperature = _roomTemperatures.GetTemperature(RoomCategory.Shaft);
                 p.NodeSettingsSource = _nodeSettingsSource;
                 p.VentilationSource = _ventilationSource;
+                p.ResistanceSource = _resistanceSourceNote;
+                p.ResistanceIsNormative = _resistanceIsNormative;
 
                 // Ограждения в грунте: площади, посчитанные зональным методом.
                 // Берутся по ВСЕМ собранным помещениям, а не только выбранным:
@@ -1860,6 +1893,79 @@ namespace QOVETER.UI
             {
                 Logger.Debug($"FillThermalCoverage: {ex.Message}");
             }
+        }
+
+        /// <summary>Режим и ручные R объекта — из файла рядом с моделью, если он есть.</summary>
+        private void LoadResistanceSettings()
+        {
+            try
+            {
+                ResistanceSource source;
+                ManualResistances manual;
+                bool applyFactor;
+                if (!ThermalNodeSettings.TryLoadResistances(_document?.PathName, out source, out manual, out applyFactor))
+                    return;
+
+                ResistanceSourceCombo.SelectedIndex = source == ResistanceSource.Normative ? 1 : 0;
+                RegionalFactorCheck.IsChecked = applyFactor;
+                RWallBox.Text   = FormatR(manual.Wall);
+                RWindowBox.Text = FormatR(manual.Window);
+                RRoofBox.Text   = FormatR(manual.Roof);
+                RFloorBox.Text  = FormatR(manual.Floor);
+                Logger.Info($"[Норматив] режим R из файла объекта: {source}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"LoadResistanceSettings: {ex.Message}");
+            }
+        }
+
+        private static string FormatR(double? r) =>
+            r.HasValue ? r.Value.ToString("0.###", System.Globalization.CultureInfo.CurrentCulture) : "";
+
+        /// <summary>
+        /// Ручные R из полей окна. Пустое поле — не задано; нечисло или число вне
+        /// 0,1…20 — ошибка с названием поля: молча проглотить опечатку значит
+        /// посчитать по норме то, что инженер считает заданным.
+        /// </summary>
+        private bool TryReadManualResistances(out ManualResistances manual, out string error)
+        {
+            manual = new ManualResistances();
+            error = null;
+
+            var fields = new[]
+            {
+                Tuple.Create(RWallBox, "стен"), Tuple.Create(RWindowBox, "окон"),
+                Tuple.Create(RRoofBox, "кровли"), Tuple.Create(RFloorBox, "пола")
+            };
+
+            var values = new double?[fields.Length];
+            for (int i = 0; i < fields.Length; i++)
+            {
+                string text = fields[i].Item1.Text?.Trim();
+                if (string.IsNullOrEmpty(text)) continue;
+
+                double r;
+                if (!TryParseFlexible(text, out r) || !ManualResistances.IsPlausible(r))
+                {
+                    error = $"R {fields[i].Item2} «{text}» — нужно число от 0,1 до 20 м²·°С/Вт " +
+                            "или пустое поле (тогда по норме).";
+                    return false;
+                }
+                values[i] = r;
+            }
+
+            manual.Wall = values[0]; manual.Window = values[1];
+            manual.Roof = values[2]; manual.Floor  = values[3];
+            return true;
+        }
+
+        private void ResistanceSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (ManualResistancePanel == null) return;   // событие приходит до построения панели
+            ManualResistancePanel.Visibility = ResistanceSourceCombo.SelectedIndex == 1
+                ? System.Windows.Visibility.Visible
+                : System.Windows.Visibility.Collapsed;
         }
 
         /// <summary>

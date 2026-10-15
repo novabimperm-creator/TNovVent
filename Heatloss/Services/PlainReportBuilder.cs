@@ -75,24 +75,29 @@ namespace QOVETER.Services
 
             if (p != null)
             {
-                sheet.Add("Чем посчитаны ограждения").Bold();
-                sheet.Add("По данным модели, м²", Round(p.WallAreaFromModelM2));
-                sheet.Add("По таблице норматива (СП 50 прил. Т), м²", Round(p.WallAreaNormativeM2));
-                sheet.Add("По типовому U — материал не распознан, м²", Round(p.WallAreaEstimatedM2));
+                if (!p.ResistanceIsNormative)
+                {
+                    sheet.Add("Чем посчитаны ограждения").Bold();
+                    sheet.Add("По данным модели, м²", Round(p.WallAreaFromModelM2));
+                    sheet.Add("По таблице норматива (СП 50 прил. Т), м²", Round(p.WallAreaNormativeM2));
+                    sheet.Add("По типовому U — материал не распознан, м²", Round(p.WallAreaEstimatedM2));
 
-                double total = p.WallAreaFromModelM2 + p.WallAreaNormativeM2 + p.WallAreaEstimatedM2;
-                if (total > 0)
-                    sheet.Add("Доля по данным модели, %", Round(p.WallAreaFromModelM2 / total * 100, 1));
+                    double total = p.WallAreaFromModelM2 + p.WallAreaNormativeM2 + p.WallAreaEstimatedM2;
+                    if (total > 0)
+                        sheet.Add("Доля по данным модели, %", Round(p.WallAreaFromModelM2 / total * 100, 1));
 
-                if (!string.IsNullOrWhiteSpace(p.WallTypesNormative))
-                    sheet.Add("Конструкции по нормативной λ", p.WallTypesNormative);
-                if (!string.IsNullOrWhiteSpace(p.WallTypesWithoutData))
-                    sheet.Add("Конструкции без теплотехники", p.WallTypesWithoutData);
-                sheet.Blank();
+                    if (!string.IsNullOrWhiteSpace(p.WallTypesNormative))
+                        sheet.Add("Конструкции по нормативной λ", p.WallTypesNormative);
+                    if (!string.IsNullOrWhiteSpace(p.WallTypesWithoutData))
+                        sheet.Add("Конструкции без теплотехники", p.WallTypesWithoutData);
+                    sheet.Blank();
+                }
 
                 sheet.Add("Принятые решения").Bold();
                 if (!string.IsNullOrWhiteSpace(p.VentilationSource))
                     sheet.Add("Воздухообмен", p.VentilationSource);
+                if (!string.IsNullOrWhiteSpace(p.ResistanceSource))
+                    sheet.Add("Сопротивления ограждений", p.ResistanceSource);
                 if (!string.IsNullOrWhiteSpace(p.NodeSettingsSource))
                     sheet.Add("Исполнение узлов фасада", p.NodeSettingsSource);
                 if (p.ShaftAreaM2 > 0)
