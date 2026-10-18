@@ -50,6 +50,7 @@ namespace TNovVent
             #endregion
 
             TNovConfig config = TNovConfigLoad.LoadConfig(DBCommandName, TNovVersion);
+            if (config == null || !CorpGate.Require(config)) return Result.Failed;
 
             #region Настройки логов
             // создание log - файла
