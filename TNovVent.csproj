@@ -65,9 +65,10 @@
                       LogicalName="QOVETER.Resources.SP230Bridges.json" />
   </ItemGroup>
 
-  <!-- ===== Версионирование ===== -->
-  <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
-    <Exec Command="powershell -ExecutionPolicy Bypass -File &quot;$(ProjectDir)UpdateVersion.ps1&quot;" />
-  </Target>
+  <!-- ===== Версионирование =====
+       Версия 1.гг.ММдд.минуты генерируется при сборке в obj (TNovGenerateVersionInfo в TNovDeploy\TNov.Build.props). -->
+  <PropertyGroup>
+    <TNovMajorVersion>1</TNovMajorVersion>
+  </PropertyGroup>
 
 </Project>

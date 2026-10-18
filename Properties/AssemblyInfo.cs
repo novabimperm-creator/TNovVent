@@ -30,5 +30,5 @@ using System.Runtime.InteropServices;
 // Следующий GUID служит для идентификации библиотеки типов, если этот проект будет видимым для COM
 [assembly: Guid("eda54d6b-e20d-410b-a88f-2b02194d9a54")]
 
-// Версия сборки задаётся в Properties\VersionInfo.cs
+// Версия сборки генерируется при сборке (TNovMajorVersion в .csproj)
 // (GenerateAssemblyInfo=false — поля «Версия сборки» в .csproj игнорируются)
